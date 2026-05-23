@@ -304,6 +304,20 @@ app.post('/admin/action', async (req, res) => {
   res.json({ success: true });
 });
 
+// NEW FIX: Admin Adjust Premium Gold
+app.post('/admin/adjust-gold', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user || user.email !== ADMIN_EMAIL) return res.status(403).json({ error: "Unauthorized. Admin only." });
+
+  const { userId, amount } = req.body;
+  let currentGold = await kv.get(`rol_premium_gold_${userId}`) || 0;
+  currentGold += amount;
+  await kv.set(`rol_premium_gold_${userId}`, currentGold);
+
+  console.log(`[ADMIN] Adjusted Premium Gold for ${userId} by ${amount}. Total is now ${currentGold}`);
+  res.json({ success: true, premiumGold: currentGold });
+});
+
 app.post('/store/dev-grant-vip', async (req, res) => {
   const { userId } = req.body;
   await kv.set(`rol_vip_${userId}`, { active: true, tier: "Dev", lootBoxesUsedThisWeek: 0, totalLootBoxesOpened: 0, loyaltyMonths: 5, grantedAt: new Date().toISOString() });
@@ -340,8 +354,10 @@ app.get('/store/inventory', async (req, res) => {
   const userId = user ? user.id : null;
 
   let userVault = [];
+  let premiumGold = 0; // NEW FIX: Include premium gold in inventory
   if (userId) {
     userVault = await kv.get(`rol_vault_${userId}`) || [];
+    premiumGold = await kv.get(`rol_premium_gold_${userId}`) || 0;
   }
   const ownedItems = userVault.map(v => v.id);
 
@@ -358,7 +374,7 @@ app.get('/store/inventory', async (req, res) => {
     purchasedItems: ownedItems,
     ownedItems: ownedItems
   };
-  res.json({ success: true, store: localStore });
+  res.json({ success: true, store: localStore, premiumGold });
 });
 
 app.post('/store/buy', async (req, res) => {
@@ -371,6 +387,48 @@ app.post('/store/buy', async (req, res) => {
   res.json({ success: true, message: "Item purchased successfully!" });
 });
 
+
+// ============================================================
+// GOOGLE PLAY BILLING / STORE PURCHASES
+// ============================================================
+app.post('/store/verify-rc-purchase', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const { userId, type, goldAmount, transactionId, productId } = req.body;
+
+  // Security check
+  if (user.id !== userId) return res.status(403).json({ error: "User ID mismatch" });
+
+  try {
+    if (type === "gold" && goldAmount) {
+      let currentGold = await kv.get(`rol_premium_gold_${userId}`) || 0;
+      currentGold += goldAmount;
+      await kv.set(`rol_premium_gold_${userId}`, currentGold);
+      console.log(`[STORE] Player ${userId} bought ${goldAmount} Premium Gold via Google Play! (Tx: ${transactionId})`);
+    }
+    else if (type === "vip") {
+      // Grant 30 days of VIP
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
+
+      let vipData = await kv.get(`rol_vip_${userId}`) || {
+        active: true, tier: "Monthly", lootBoxesUsedThisWeek: 0, totalLootBoxesOpened: 0, loyaltyMonths: 0
+      };
+
+      vipData.active = true;
+      vipData.expiresAt = expiresAt.toISOString();
+      vipData.loyaltyMonths = (vipData.loyaltyMonths || 0) + 1;
+
+      await kv.set(`rol_vip_${userId}`, vipData);
+      console.log(`[STORE] Player ${userId} subscribed to VIP via Google Play! (Tx: ${transactionId})`);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[STORE] Google Play fulfillment error:", err);
+    res.status(500).json({ error: "Failed to fulfill purchase" });
+  }
+});
 
 // ============================================================
 // OFFICIAL LOOT BOX GENERATOR & VAULT MANAGEMENT
@@ -492,8 +550,6 @@ app.post('/store/open-lootbox', async (req, res) => {
 
   res.json({ success: true, loot: { rarity, item } });
 });
-
-app.post('/store/verify-rc-purchase', (req, res) => res.json({ success: true }));
 
 app.get('/store/vault', async (req, res) => {
   const user = getAuthUser(req);
