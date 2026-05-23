@@ -3,13 +3,17 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // THE GAME MASTER
 const ADMIN_EMAIL = "cheyennetoews@gmail.com";
 
 // Middleware
-app.use(cors({ origin: '*' }));
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-token']
+}));
 app.use(express.json({ limit: '50mb' }));
 
 // ============================================================
@@ -526,6 +530,6 @@ app.use((req, res) => {
 });
 
 // START SERVER
-app.listen(PORT, () => {
-  console.log(`⚔️ Realm of Legends Custom Server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`⚔️ Realm of Legends Custom Server running on port ${PORT}`);
 });
