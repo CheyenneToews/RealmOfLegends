@@ -588,6 +588,116 @@ app.post('/assets/upload-bulk', async (req, res) => {
 });
 
 // ============================================================
+// FRIENDS & CHAT SYSTEM
+// ============================================================
+app.get('/friends/search', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const query = (req.query.q || "").toLowerCase();
+
+  const allUsers = await kv.getByPrefix('user_');
+  const results = allUsers
+    .filter(u => u.id !== user.id && (u.email.toLowerCase().includes(query) || (u.displayName && u.displayName.toLowerCase().includes(query))))
+    .map(u => ({ id: u.id, display_name: u.displayName }));
+
+  res.json({ success: true, users: results });
+});
+
+app.post('/friends/request', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const { receiverId } = req.body;
+
+  const friendshipId = `friend_${Date.now()}`;
+  const friendship = {
+    id: friendshipId,
+    requester_id: user.id,
+    receiver_id: receiverId,
+    status: 'pending',
+    created_at: new Date().toISOString()
+  };
+
+  await kv.set(`rol_friendship_${friendshipId}`, friendship);
+  res.json({ success: true, friendship });
+});
+
+app.get('/friends/list', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const allFriendships = await kv.getByPrefix('rol_friendship_');
+  const myFriendships = allFriendships.filter(f => f.requester_id === user.id || f.receiver_id === user.id);
+
+  // Populate friend profiles so the UI shows their names
+  for (const f of myFriendships) {
+    const friendId = f.requester_id === user.id ? f.receiver_id : f.requester_id;
+    const friendRecord = await kv.get(friendId);
+    if (friendRecord) {
+      f.friend_profile = { id: friendRecord.id, display_name: friendRecord.displayName };
+    }
+  }
+
+  res.json({ success: true, friendships: myFriendships });
+});
+
+app.post('/friends/accept', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const { friendshipId } = req.body;
+
+  let friendship = await kv.get(`rol_friendship_${friendshipId}`);
+  if (friendship && friendship.receiver_id === user.id) {
+    friendship.status = 'accepted';
+    await kv.set(`rol_friendship_${friendshipId}`, friendship);
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: "Invalid request" });
+  }
+});
+
+app.delete('/friends/:id', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  await kv.del(`rol_friendship_${req.params.id}`);
+  res.json({ success: true });
+});
+
+// --- CHAT SYSTEM ---
+app.get('/friends/chat/:friendId', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const friendId = req.params.friendId;
+
+  // Create a unique conversation ID by sorting the two user IDs
+  const convoId = [user.id, friendId].sort().join('_');
+  const chatHistory = await kv.get(`rol_chat_${convoId}`) || [];
+
+  res.json({ success: true, messages: chatHistory });
+});
+
+app.post('/friends/chat', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const { receiverId, content } = req.body;
+
+  const convoId = [user.id, receiverId].sort().join('_');
+  let chatHistory = await kv.get(`rol_chat_${convoId}`) || [];
+
+  const newMessage = {
+    id: `msg_${Date.now()}`,
+    sender_id: user.id,
+    receiver_id: receiverId,
+    content: content,
+    created_at: new Date().toISOString()
+  };
+
+  chatHistory.push(newMessage);
+  await kv.set(`rol_chat_${convoId}`, chatHistory);
+
+  res.json({ success: true, message: newMessage });
+});
+
+// ============================================================
 // DUMMY CATCH-ALLS (Silences frontend 404/telemetry errors)
 // ============================================================
 app.get('/texture-tuner', (req, res) => res.json({ success: true, value: null }));
