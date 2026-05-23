@@ -8,12 +8,9 @@ const PORT = process.env.PORT || 3000;
 // THE GAME MASTER
 const ADMIN_EMAIL = "cheyennetoews@gmail.com";
 
-// Middleware
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-token']
-}));
+// Middleware - THE ULTIMATE WILDCARD
+// Leaving cors() empty automatically reflects and approves ANY header or origin the phone sends!
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // ============================================================
@@ -83,7 +80,6 @@ async function trackUser(email, displayName = null) {
     };
     console.log(`[DATABASE] New local account registered: ${email}`);
 
-    // Automatically create the VIP vault record for the Game Master!
     if (isGameMaster) {
       await kv.set(`rol_vip_${userId}`, {
         active: true, tier: "Grandmaster", lootBoxesUsedThisWeek: 0,
@@ -142,13 +138,13 @@ function getAuthUser(req) {
 // ADMIN & VIP SYSTEM
 // ============================================================
 
-app.get('/make-server-6100f0a9/admin/check', (req, res) => {
+app.get('/admin/check', (req, res) => {
   const user = getAuthUser(req);
   const isAdmin = user && user.email === ADMIN_EMAIL;
   res.json({ success: true, isAdmin: isAdmin });
 });
 
-app.get('/make-server-6100f0a9/admin/stats', async (req, res) => {
+app.get('/admin/stats', async (req, res) => {
   const users = await kv.getByPrefix('user_');
   const activeVips = users.filter(u => u.vipActive).length;
   const activeBans = users.filter(u => u.banned).length;
@@ -158,31 +154,31 @@ app.get('/make-server-6100f0a9/admin/stats', async (req, res) => {
   });
 });
 
-app.get('/make-server-6100f0a9/admin/users', async (req, res) => {
+app.get('/admin/users', async (req, res) => {
   const users = await kv.getByPrefix('user_');
   res.json({ success: true, users });
 });
 
-app.get('/make-server-6100f0a9/admin/activity-log', (req, res) => {
+app.get('/admin/activity-log', (req, res) => {
   res.json({ success: true, log: [] });
 });
 
-app.get('/make-server-6100f0a9/admin/list-admins', (req, res) => {
+app.get('/admin/list-admins', (req, res) => {
   res.json({ success: true, admins: [ADMIN_EMAIL] });
 });
 
 // --- REPORTS MODULE ROUTES ---
-app.get('/make-server-6100f0a9/admin/reports/players', async (req, res) => {
+app.get('/admin/reports/players', async (req, res) => {
   const reports = await kv.getByPrefix('rol_preport_');
   res.json({ success: true, reports });
 });
 
-app.get('/make-server-6100f0a9/admin/reports/bugs', async (req, res) => {
+app.get('/admin/reports/bugs', async (req, res) => {
   const bugs = await kv.getByPrefix('rol_bug_');
   res.json({ success: true, bugs });
 });
 
-app.post('/make-server-6100f0a9/admin/reports/players/status', async (req, res) => {
+app.post('/admin/reports/players/status', async (req, res) => {
   const { reportId, status } = req.body;
   let report = await kv.get(`rol_preport_${reportId}`);
   if (report) {
@@ -192,7 +188,7 @@ app.post('/make-server-6100f0a9/admin/reports/players/status', async (req, res) 
   res.json({ success: true });
 });
 
-app.post('/make-server-6100f0a9/admin/reports/bugs/status', async (req, res) => {
+app.post('/admin/reports/bugs/status', async (req, res) => {
   const { bugId, status } = req.body;
   let bug = await kv.get(`rol_bug_${bugId}`);
   if (bug) {
@@ -202,7 +198,7 @@ app.post('/make-server-6100f0a9/admin/reports/bugs/status', async (req, res) => 
   res.json({ success: true });
 });
 
-app.post('/make-server-6100f0a9/reports/bugs', async (req, res) => {
+app.post('/reports/bugs', async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
@@ -226,13 +222,13 @@ app.post('/make-server-6100f0a9/reports/bugs', async (req, res) => {
 });
 
 // --- AI SCRIPTS ROUTES ---
-app.get('/make-server-6100f0a9/ai-scripts/list', async (req, res) => {
+app.get('/ai-scripts/list', async (req, res) => {
   const guestId = req.query.guestId || "admin";
   const scripts = await kv.getByPrefix(`rol_ai_${guestId}_`);
   res.json({ success: true, scripts });
 });
 
-app.post('/make-server-6100f0a9/ai-scripts/save', async (req, res) => {
+app.post('/ai-scripts/save', async (req, res) => {
   const { script, guestId } = req.body;
   if (!script || !script.id) return res.status(400).json({ error: "Missing script data" });
   const gid = guestId || "admin";
@@ -240,20 +236,20 @@ app.post('/make-server-6100f0a9/ai-scripts/save', async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete('/make-server-6100f0a9/ai-scripts/:id', async (req, res) => {
+app.delete('/ai-scripts/:id', async (req, res) => {
   const guestId = req.query.guestId || "admin";
   await kv.del(`rol_ai_${guestId}_${req.params.id}`);
   res.json({ success: true });
 });
 
 // --- CAMPAIGNS ROUTES ---
-app.get('/make-server-6100f0a9/campaigns/list', async (req, res) => {
+app.get('/campaigns/list', async (req, res) => {
   const ownerId = req.query.userId || req.query.guestId || "anonymous";
   const campaigns = await kv.getByPrefix(`rol_camp_${ownerId}_`);
   res.json({ success: true, campaigns });
 });
 
-app.post('/make-server-6100f0a9/campaigns/save', async (req, res) => {
+app.post('/campaigns/save', async (req, res) => {
   const { campaign, userId, guestId } = req.body;
   if (!campaign || !campaign.id) return res.status(400).json({ error: "Missing data" });
   const ownerId = userId || guestId || "anonymous";
@@ -261,14 +257,14 @@ app.post('/make-server-6100f0a9/campaigns/save', async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete('/make-server-6100f0a9/campaigns/:id', async (req, res) => {
+app.delete('/campaigns/:id', async (req, res) => {
   const ownerId = req.query.userId || req.query.guestId || "anonymous";
   await kv.del(`rol_camp_${ownerId}_${req.params.id}`);
   res.json({ success: true });
 });
 
 // --- ADMIN ACTIONS ---
-app.post('/make-server-6100f0a9/admin/toggle-vip', async (req, res) => {
+app.post('/admin/toggle-vip', async (req, res) => {
   const { userId, active } = req.body;
   let userRecord = await kv.get(userId);
   if (userRecord) {
@@ -284,7 +280,7 @@ app.post('/make-server-6100f0a9/admin/toggle-vip', async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/make-server-6100f0a9/admin/toggle-ban', async (req, res) => {
+app.post('/admin/toggle-ban', async (req, res) => {
   const { userId, banned, reason } = req.body;
   let userRecord = await kv.get(userId);
   if (userRecord) {
@@ -296,7 +292,7 @@ app.post('/make-server-6100f0a9/admin/toggle-ban', async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/make-server-6100f0a9/admin/action', async (req, res) => {
+app.post('/admin/action', async (req, res) => {
   const user = getAuthUser(req);
   if (!user || user.email !== ADMIN_EMAIL) return res.status(403).json({ error: "Unauthorized." });
   const { action, targetUserId, amount } = req.body;
@@ -309,25 +305,25 @@ app.post('/make-server-6100f0a9/admin/action', async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/make-server-6100f0a9/store/dev-grant-vip', async (req, res) => {
+app.post('/store/dev-grant-vip', async (req, res) => {
   const { userId } = req.body;
   await kv.set(`rol_vip_${userId}`, { active: true, tier: "Dev", lootBoxesUsedThisWeek: 0, totalLootBoxesOpened: 0, loyaltyMonths: 5, grantedAt: new Date().toISOString() });
   res.json({ success: true });
 });
 
-app.get('/make-server-6100f0a9/store/vip-status', async (req, res) => {
+app.get('/store/vip-status', async (req, res) => {
   const userId = req.query.userId;
   if (!userId) return res.json({ success: true, vipStatus: null });
   const vipData = await kv.get(`rol_vip_${userId}`);
   res.json({ success: true, vipStatus: vipData || null });
 });
 
-app.get('/make-server-6100f0a9/admin/gold/:userId', async (req, res) => {
+app.get('/admin/gold/:userId', async (req, res) => {
   const goldData = await kv.get(`rol_gold_adj_${req.params.userId}`);
   res.json({ success: true, goldAdjustment: goldData || { totalAdjusted: 0, lastClaimedTotal: 0 } });
 });
 
-app.post('/make-server-6100f0a9/admin/gold/:userId/claim', async (req, res) => {
+app.post('/admin/gold/:userId/claim', async (req, res) => {
   const { claimedTotal } = req.body;
   let goldData = await kv.get(`rol_gold_adj_${req.params.userId}`);
   if (goldData) {
@@ -340,7 +336,7 @@ app.post('/make-server-6100f0a9/admin/gold/:userId/claim', async (req, res) => {
 // ============================================================
 // STORE INVENTORY
 // ============================================================
-app.get('/make-server-6100f0a9/store/inventory', async (req, res) => {
+app.get('/store/inventory', async (req, res) => {
   const user = getAuthUser(req);
   const userId = user ? user.id : null;
 
@@ -366,7 +362,7 @@ app.get('/make-server-6100f0a9/store/inventory', async (req, res) => {
   res.json({ success: true, store: localStore });
 });
 
-app.post('/make-server-6100f0a9/store/buy', async (req, res) => {
+app.post('/store/buy', async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
   const { itemId, price } = req.body;
@@ -379,9 +375,9 @@ app.post('/make-server-6100f0a9/store/buy', async (req, res) => {
 // ============================================================
 // DUMMY CATCH-ALLS (Silences frontend 404/telemetry errors)
 // ============================================================
-app.get('/make-server-6100f0a9/texture-tuner', (req, res) => res.json({ success: true, value: null }));
-app.get('/make-server-6100f0a9/custom-maps/list', (req, res) => res.json({ success: true, maps: [] }));
-app.get('/make-server-6100f0a9/admin/ban-check/:userId', async (req, res) => {
+app.get('/texture-tuner', (req, res) => res.json({ success: true, value: null }));
+app.get('/custom-maps/list', (req, res) => res.json({ success: true, maps: [] }));
+app.get('/admin/ban-check/:userId', async (req, res) => {
   const userRecord = await kv.get(req.params.userId);
   res.json({ banned: userRecord ? userRecord.banned : false, reason: userRecord ? userRecord.banReason : null });
 });
@@ -392,7 +388,7 @@ app.use('/rest/v1', (req, res) => res.json([]));
 // ============================================================
 // SAVE / LOAD SYSTEM
 // ============================================================
-app.post('/make-server-6100f0a9/save-game', async (req, res) => {
+app.post('/save-game', async (req, res) => {
   const { saveId, saveData } = req.body;
   if (!saveId || !saveData) return res.status(400).json({ error: "Missing data" });
   await kv.set(`rol_save_${saveId}`, saveData);
@@ -405,19 +401,19 @@ app.post('/make-server-6100f0a9/save-game', async (req, res) => {
   res.json({ success: true, saveId });
 });
 
-app.get('/make-server-6100f0a9/list-saves', async (req, res) => {
+app.get('/list-saves', async (req, res) => {
   const saves = await kv.getByPrefix('rol_save_index_');
   res.json({ success: true, saves });
 });
 
-app.get('/make-server-6100f0a9/load-game/:saveId', async (req, res) => {
+app.get('/load-game/:saveId', async (req, res) => {
   const saveData = await kv.get(`rol_save_${req.params.saveId}`);
   if (!saveData) return res.status(404).json({ error: "Save not found" });
   console.log(`[LOAD] Game loaded locally: ${req.params.saveId}`);
   res.json({ success: true, saveData });
 });
 
-app.delete('/make-server-6100f0a9/delete-save/:saveId', async (req, res) => {
+app.delete('/delete-save/:saveId', async (req, res) => {
   await kv.del(`rol_save_${req.params.saveId}`);
   await kv.del(`rol_save_index_${req.params.saveId}`);
   res.json({ success: true });
@@ -426,7 +422,7 @@ app.delete('/make-server-6100f0a9/delete-save/:saveId', async (req, res) => {
 // ============================================================
 // MULTIPLAYER LOBBIES & WEGO POLLING
 // ============================================================
-app.post('/make-server-6100f0a9/sessions/create', async (req, res) => {
+app.post('/sessions/create', async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
   const { sessionName, maxPlayers } = req.body;
@@ -443,13 +439,13 @@ app.post('/make-server-6100f0a9/sessions/create', async (req, res) => {
   res.json({ success: true, sessionId, session });
 });
 
-app.get('/make-server-6100f0a9/sessions', async (req, res) => {
+app.get('/sessions', async (req, res) => {
   const sessions = await kv.getByPrefix("rol_session_idx_");
   const active = sessions.filter(s => s.status === "lobby" || s.status === "active");
   res.json({ success: true, sessions: active });
 });
 
-app.post('/make-server-6100f0a9/sessions/:sessionId/join', async (req, res) => {
+app.post('/sessions/:sessionId/join', async (req, res) => {
   const user = getAuthUser(req);
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -460,7 +456,7 @@ app.post('/make-server-6100f0a9/sessions/:sessionId/join', async (req, res) => {
   res.json({ success: true, session });
 });
 
-app.post('/make-server-6100f0a9/sessions/:sessionId/start', async (req, res) => {
+app.post('/sessions/:sessionId/start', async (req, res) => {
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   session.status = "active"; session.turnCount = 1;
   await kv.set(`rol_session_${session.id}`, session);
@@ -468,7 +464,7 @@ app.post('/make-server-6100f0a9/sessions/:sessionId/start', async (req, res) => 
   res.json({ success: true, session });
 });
 
-app.post('/make-server-6100f0a9/sessions/:sessionId/action', async (req, res) => {
+app.post('/sessions/:sessionId/action', async (req, res) => {
   const user = getAuthUser(req);
   const { action, stateSnapshot } = req.body;
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
@@ -486,7 +482,7 @@ app.post('/make-server-6100f0a9/sessions/:sessionId/action', async (req, res) =>
   res.json({ success: true, session });
 });
 
-app.get('/make-server-6100f0a9/sessions/:sessionId/poll', async (req, res) => {
+app.get('/sessions/:sessionId/poll', async (req, res) => {
   const since = parseInt(req.query.since || "0", 10);
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -498,7 +494,7 @@ app.get('/make-server-6100f0a9/sessions/:sessionId/poll', async (req, res) => {
   });
 });
 
-app.post('/make-server-6100f0a9/sessions/:sessionId/chat', async (req, res) => {
+app.post('/sessions/:sessionId/chat', async (req, res) => {
   const user = getAuthUser(req);
   const { message } = req.body;
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
@@ -509,7 +505,7 @@ app.post('/make-server-6100f0a9/sessions/:sessionId/chat', async (req, res) => {
   res.json({ success: true });
 });
 
-app.put('/make-server-6100f0a9/sessions/:sessionId/settings', async (req, res) => {
+app.put('/sessions/:sessionId/settings', async (req, res) => {
   const { competitiveMode } = req.body;
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   if (session) {
