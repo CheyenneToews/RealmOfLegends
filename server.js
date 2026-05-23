@@ -373,6 +373,61 @@ app.post('/store/buy', async (req, res) => {
 });
 
 // ============================================================
+// ASSET STORAGE (Maps & Images)
+// ============================================================
+app.get('/assets/game-map-urls', async (req, res) => {
+  try {
+    const assets = await kv.getByPrefix('rol_asset_');
+    const urls = {};
+    // Extract only the map images and send their base64 data back as the "url"
+    assets.forEach(a => {
+      if (a.assetKey && a.assetKey.startsWith('map_')) {
+        urls[a.assetKey] = a.base64Data;
+      }
+    });
+    res.json({ success: true, urls });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load maps" });
+  }
+});
+
+app.post('/assets/upload', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user || user.email !== ADMIN_EMAIL) return res.status(403).json({ error: "Unauthorized. Admin only." });
+
+  const { assetKey, base64Data } = req.body;
+  if (!assetKey || !base64Data) return res.status(400).json({ error: "Missing image data" });
+
+  await kv.set(`rol_asset_${assetKey}`, { assetKey, base64Data, uploadedAt: new Date().toISOString() });
+  console.log(`[ASSETS] Admin uploaded single asset: ${assetKey}`);
+  res.json({ success: true, url: base64Data });
+});
+
+app.post('/assets/upload-bulk', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user || user.email !== ADMIN_EMAIL) return res.status(403).json({ error: "Unauthorized. Admin only." });
+
+  const { assets } = req.body;
+  if (!Array.isArray(assets)) return res.status(400).json({ error: "Invalid bulk data" });
+
+  const results = [];
+  for (const asset of assets) {
+    try {
+      await kv.set(`rol_asset_${asset.assetKey}`, {
+        assetKey: asset.assetKey,
+        base64Data: asset.base64Data,
+        uploadedAt: new Date().toISOString()
+      });
+      results.push({ assetKey: asset.assetKey, success: true });
+    } catch (e) {
+      results.push({ assetKey: asset.assetKey, success: false, error: e.message });
+    }
+  }
+  console.log(`[ASSETS] Admin bulk uploaded ${results.filter(r => r.success).length} assets.`);
+  res.json({ success: true, results });
+});
+
+// ============================================================
 // DUMMY CATCH-ALLS (Silences frontend 404/telemetry errors)
 // ============================================================
 app.get('/texture-tuner', (req, res) => res.json({ success: true, value: null }));
