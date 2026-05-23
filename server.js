@@ -9,7 +9,6 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_EMAIL = "cheyennetoews@gmail.com";
 
 // Middleware - THE ULTIMATE WILDCARD
-// Leaving cors() empty automatically reflects and approves ANY header or origin the phone sends!
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
@@ -372,6 +371,168 @@ app.post('/store/buy', async (req, res) => {
   res.json({ success: true, message: "Item purchased successfully!" });
 });
 
+
+// ============================================================
+// OFFICIAL LOOT BOX GENERATOR & VAULT MANAGEMENT
+// ============================================================
+const BASE_LOOT_WEIGHTS = [
+  { rarity: "common", weight: 40 },
+  { rarity: "uncommon", weight: 30 },
+  { rarity: "rare", weight: 20 },
+  { rarity: "epic", weight: 8 },
+  { rarity: "legendary", weight: 2 },
+];
+
+const LOYALTY_BONUS_PER_MONTH = 0.5;
+const LOYALTY_MAX_MONTHS = 10;
+
+function rollLootRarity(loyaltyMonths = 0) {
+  const months = Math.min(Math.max(loyaltyMonths || 0, 0), LOYALTY_MAX_MONTHS);
+  const legendaryBonus = months * LOYALTY_BONUS_PER_MONTH;
+  const weights = BASE_LOOT_WEIGHTS.map(w => ({
+    rarity: w.rarity,
+    weight: w.rarity === "legendary"
+      ? w.weight + legendaryBonus
+      : w.rarity === "common"
+        ? Math.max(w.weight - legendaryBonus, 20)
+        : w.weight,
+  }));
+  const total = weights.reduce((s, w) => s + w.weight, 0);
+  let roll = Math.random() * total;
+  for (const { rarity, weight } of weights) {
+    roll -= weight;
+    if (roll <= 0) return rarity;
+  }
+  return "common";
+}
+
+const LOOT_ITEMS = {
+  common: [
+    { id: "iron_sword", name: "Iron Sword", emoji: "🗡️", type: "weapon", slot: "mainHand" },
+    { id: "leather_armor", name: "Leather Armor", emoji: "🎽", type: "armor", slot: "chest" },
+    { id: "leather_boots", name: "Leather Boots", emoji: "👢", type: "armor", slot: "feet" },
+    { id: "leather_cap", name: "Leather Cap", emoji: "🎩", type: "armor", slot: "head" },
+    { id: "cloth_pants", name: "Cloth Pants", emoji: "👖", type: "armor", slot: "legs" },
+    { id: "copper_ring", name: "Copper Ring", emoji: "💍", type: "accessory", slot: "ring1" },
+    { id: "wooden_pendant", name: "Wooden Pendant", emoji: "📿", type: "accessory", slot: "amulet" },
+    { id: "wooden_shield", name: "Wooden Shield", emoji: "🛡️", type: "armor", slot: "offHand" },
+    { id: "health_potion", name: "Health Potion", emoji: "🧪", type: "consumable" },
+  ],
+  uncommon: [
+    { id: "steel_longsword", name: "Steel Longsword", emoji: "⚔️", type: "weapon", slot: "mainHand" },
+    { id: "chainmail", name: "Chainmail", emoji: "🎽", type: "armor", slot: "chest" },
+    { id: "iron_shield", name: "Iron Shield", emoji: "🛡️", type: "armor", slot: "offHand" },
+    { id: "steel_helm", name: "Steel Helm", emoji: "⛑️", type: "armor", slot: "head" },
+    { id: "reinforced_greaves", name: "Reinforced Greaves", emoji: "👖", type: "armor", slot: "legs" },
+    { id: "ring_of_strength", name: "Ring of Strength", emoji: "💍", type: "accessory", slot: "ring1" },
+    { id: "amulet_of_health", name: "Amulet of Health", emoji: "📿", type: "accessory", slot: "amulet" },
+    { id: "owlseye_pendant", name: "Owl's Eye Pendant", emoji: "🦉", type: "accessory", slot: "amulet" },
+    { id: "greater_health_potion", name: "Greater Health Potion", emoji: "🧪", type: "consumable" },
+  ],
+  rare: [
+    { id: "elven_bow", name: "Elven Bow", emoji: "🏹", type: "weapon", slot: "mainHand" },
+    { id: "staff_of_wisdom", name: "Staff of Wisdom", emoji: "🪄", type: "weapon", slot: "mainHand" },
+    { id: "arcane_tome", name: "Arcane Tome", emoji: "📖", type: "weapon", slot: "offHand" },
+    { id: "circlet_of_insight", name: "Circlet of Insight", emoji: "👑", type: "accessory", slot: "head" },
+    { id: "swiftstrider_pants", name: "Swiftstrider Pants", emoji: "👖", type: "armor", slot: "legs" },
+    { id: "boots_of_haste", name: "Boots of Haste", emoji: "👢", type: "armor", slot: "feet" },
+    { id: "ring_of_protection", name: "Ring of Protection", emoji: "💍", type: "accessory", slot: "ring1" },
+    { id: "moonstone_circlet", name: "Moonstone Circlet", emoji: "🌙", type: "accessory", slot: "head" },
+    { id: "deaths_door_charm", name: "Death's Door Charm", emoji: "📿", type: "accessory", slot: "amulet" },
+  ],
+  epic: [
+    { id: "shadow_dagger", name: "Shadow Dagger", emoji: "🗡️", type: "weapon", slot: "mainHand" },
+    { id: "flame_brand", name: "Flame Brand", emoji: "🔥", type: "weapon", slot: "mainHand" },
+    { id: "frostbite_staff", name: "Frostbite Staff", emoji: "❄️", type: "weapon", slot: "mainHand" },
+    { id: "venomfang_bow", name: "Venomfang Bow", emoji: "🏹", type: "weapon", slot: "mainHand" },
+    { id: "dragonscale_vest", name: "Dragonscale Vest", emoji: "🐉", type: "armor", slot: "chest" },
+    { id: "mirror_shield", name: "Mirror Shield", emoji: "🪞", type: "armor", slot: "offHand" },
+    { id: "wardens_bulwark", name: "Warden's Bulwark", emoji: "🛡️", type: "armor", slot: "offHand" },
+    { id: "dark_ritual_cowl", name: "Dark Ritual Cowl", emoji: "🦇", type: "armor", slot: "head" },
+    { id: "shadowweave_leggings", name: "Shadowweave Leggings", emoji: "👖", type: "armor", slot: "legs" },
+    { id: "stormtouched_greaves", name: "Stormtouched Greaves", emoji: "⚡", type: "armor", slot: "feet" },
+    { id: "signet_of_kings", name: "Signet of Kings", emoji: "💍", type: "accessory", slot: "ring1" },
+    { id: "band_of_shadows", name: "Band of Shadows", emoji: "💍", type: "accessory", slot: "ring1" },
+    { id: "ring_of_defiance", name: "Ring of Defiance", emoji: "💍", type: "accessory", slot: "ring1" },
+    { id: "talisman_of_the_wild", name: "Talisman of the Wild", emoji: "🦌", type: "accessory", slot: "amulet" },
+  ],
+  legendary: [
+    { id: "worldsplitter", name: "Worldsplitter", emoji: "🪓", type: "weapon", slot: "mainHand" },
+    { id: "crown_of_the_lich", name: "Crown of the Lich", emoji: "👑", type: "accessory", slot: "head" },
+    { id: "phoenix_pendant", name: "Phoenix Pendant", emoji: "📿", type: "accessory", slot: "amulet" },
+  ],
+};
+
+app.post('/store/open-lootbox', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  let vipData = await kv.get(`rol_vip_${user.id}`);
+  if (!vipData || !vipData.active) return res.status(403).json({ error: "VIP Required to open boxes." });
+
+  if ((vipData.lootBoxesUsedThisWeek || 0) >= 10) {
+    return res.status(400).json({ error: "No boxes remaining this week!" });
+  }
+
+  // Deduct the box
+  vipData.lootBoxesUsedThisWeek = (vipData.lootBoxesUsedThisWeek || 0) + 1;
+  vipData.totalLootBoxesOpened = (vipData.totalLootBoxesOpened || 0) + 1;
+  await kv.set(`rol_vip_${user.id}`, vipData);
+
+  // OFFICIAL REWARD GENERATOR
+  const loyaltyMonths = vipData.loyaltyMonths || 0;
+  const rarity = rollLootRarity(loyaltyMonths);
+  const possibleItems = LOOT_ITEMS[rarity] || LOOT_ITEMS.common;
+  const item = possibleItems[Math.floor(Math.random() * possibleItems.length)];
+
+  // Add to the player's vault
+  let userVault = await kv.get(`rol_vault_${user.id}`) || [];
+  userVault.push({ id: item.id, acquiredAt: new Date().toISOString() });
+  await kv.set(`rol_vault_${user.id}`, userVault);
+
+  res.json({ success: true, loot: { rarity, item } });
+});
+
+app.post('/store/verify-rc-purchase', (req, res) => res.json({ success: true }));
+
+app.get('/store/vault', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  let userVault = await kv.get(`rol_vault_${user.id}`) || [];
+
+  // Flatten the LOOT_ITEMS dictionary to look up the rich data (emoji, name)
+  const allLoot = Object.values(LOOT_ITEMS).flat();
+
+  const populatedVault = userVault.map((savedItem, index) => {
+    const itemData = allLoot.find(i => i.id === savedItem.id) || { name: "Unknown Item", emoji: "📦", type: "item" };
+    return {
+      ...itemData,
+      id: savedItem.id, // The raw ID
+      _uid: `${savedItem.id}-${savedItem.acquiredAt}-${index}` // Unique ID for React & Deletion
+    };
+  });
+
+  res.json({ success: true, vault: populatedVault });
+});
+
+app.post('/store/delete-item', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const { itemId } = req.body;
+
+  let userVault = await kv.get(`rol_vault_${user.id}`) || [];
+
+  // Find the FIRST matching item and remove it (so we don't delete duplicates)
+  const index = userVault.findIndex(v => v.id === itemId);
+  if (index !== -1) {
+    userVault.splice(index, 1);
+    await kv.set(`rol_vault_${user.id}`, userVault);
+  }
+
+  res.json({ success: true });
+});
+
 // ============================================================
 // ASSET STORAGE (Maps & Images)
 // ============================================================
@@ -379,7 +540,6 @@ app.get('/assets/game-map-urls', async (req, res) => {
   try {
     const assets = await kv.getByPrefix('rol_asset_');
     const urls = {};
-    // Extract only the map images and send their base64 data back as the "url"
     assets.forEach(a => {
       if (a.assetKey && a.assetKey.startsWith('map_')) {
         urls[a.assetKey] = a.base64Data;
@@ -437,7 +597,6 @@ app.get('/admin/ban-check/:userId', async (req, res) => {
   res.json({ banned: userRecord ? userRecord.banned : false, reason: userRecord ? userRecord.banReason : null });
 });
 
-// CRASH-PROOF: Middleware handle for Supabase REST API requests cleanly
 app.use('/rest/v1', (req, res) => res.json([]));
 
 // ============================================================
@@ -572,15 +731,10 @@ app.put('/sessions/:sessionId/settings', async (req, res) => {
   }
 });
 
-// ============================================================
-// THE ULTIMATE CATCH-ALL (CRASH-PROOF EXPRESS 5 WAY)
-// ============================================================
 app.use((req, res) => {
-  // Just silently accept any rogue requests (like telemetry or old supabase pings)
   res.json({ success: true, dummy: true, data: [] });
 });
 
-// START SERVER
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`⚔️ Realm of Legends Custom Server running on port ${PORT}`);
 });
