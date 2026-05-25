@@ -810,11 +810,12 @@ app.post('/sessions/create', async (req, res) => {
   const session = {
     id: sessionId, name: sessionName || `${user.email.split("@")[0]}'s Game`,
     hostId: user.id, maxPlayers: maxPlayers || 4,
-    players: [{ userId: user.id, email: user.email, isHost: true }],
-    status: "lobby", turnCount: 0, currentPlayerIndex: 0, actionLog: [], chatMessages: []
+    players: [{ userId: user.id, email: user.email, isHost: true, joinedAt: new Date().toISOString() }],
+    status: "lobby", turnCount: 0, currentPlayerIndex: 0, actionLog: [], chatMessages: [],
+    createdAt: new Date().toISOString()
   };
   await kv.set(`rol_session_${sessionId}`, session);
-  await kv.set(`rol_session_idx_${sessionId}`, { id: sessionId, status: "lobby", playerCount: 1 });
+  await kv.set(`rol_session_idx_${sessionId}`, { id: sessionId, name: session.name, status: "lobby", playerCount: 1, maxPlayers: session.maxPlayers, createdAt: session.createdAt });
   console.log(`[MULTIPLAYER] Lobby Created: ${sessionId}`);
   res.json({ success: true, sessionId, session });
 });
@@ -825,13 +826,28 @@ app.get('/sessions', async (req, res) => {
   res.json({ success: true, sessions: active });
 });
 
+// THE FIX: ADDED MISSING GET SESSION ENDPOINT
+app.get('/sessions/:sessionId', async (req, res) => {
+  const session = await kv.get(`rol_session_${req.params.sessionId}`);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  res.json({ success: true, session });
+});
+
 app.post('/sessions/:sessionId/join', async (req, res) => {
   const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   if (!session) return res.status(404).json({ error: "Not found" });
   if (!session.players.find(p => p.userId === user.id)) {
-    session.players.push({ userId: user.id, email: user.email, isHost: false });
+    session.players.push({ userId: user.id, email: user.email, isHost: false, joinedAt: new Date().toISOString() });
     await kv.set(`rol_session_${session.id}`, session);
+
+    // update index player count
+    const idx = await kv.get(`rol_session_idx_${session.id}`);
+    if (idx) {
+      idx.playerCount = session.players.length;
+      await kv.set(`rol_session_idx_${session.id}`, idx);
+    }
   }
   res.json({ success: true, session });
 });
@@ -895,6 +911,41 @@ app.put('/sessions/:sessionId/settings', async (req, res) => {
   } else {
     res.status(404).json({ error: "Not found" });
   }
+});
+
+// THE FIX: ADDED LEAVE/DISBAND/DELETE ROUTES FOR COMPLETE LOBBY MANAGEMENT
+app.post('/sessions/:sessionId/leave', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const session = await kv.get(`rol_session_${req.params.sessionId}`);
+  if (session) {
+    session.players = session.players.filter(p => p.userId !== user.id);
+    await kv.set(`rol_session_${req.params.sessionId}`, session);
+
+    const idx = await kv.get(`rol_session_idx_${req.params.sessionId}`);
+    if (idx) {
+      idx.playerCount = session.players.length;
+      await kv.set(`rol_session_idx_${req.params.sessionId}`, idx);
+    }
+  }
+  res.json({ success: true });
+});
+
+app.post('/sessions/:sessionId/disband', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  const session = await kv.get(`rol_session_${req.params.sessionId}`);
+  if (session && session.hostId === user.id) {
+    await kv.del(`rol_session_${req.params.sessionId}`);
+    await kv.del(`rol_session_idx_${req.params.sessionId}`);
+  }
+  res.json({ success: true });
+});
+
+app.delete('/sessions/:sessionId', async (req, res) => {
+  await kv.del(`rol_session_${req.params.sessionId}`);
+  await kv.del(`rol_session_idx_${req.params.sessionId}`);
+  res.json({ success: true });
 });
 
 app.use((req, res) => {
