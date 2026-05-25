@@ -136,7 +136,6 @@ function getAuthUser(req) {
 // ============================================================
 // ADMIN & VIP SYSTEM
 // ============================================================
-
 app.get('/admin/check', (req, res) => {
   const user = getAuthUser(req);
   const isAdmin = user && user.email === ADMIN_EMAIL;
@@ -166,7 +165,6 @@ app.get('/admin/list-admins', (req, res) => {
   res.json({ success: true, admins: [ADMIN_EMAIL] });
 });
 
-// --- REPORTS MODULE ROUTES ---
 app.get('/admin/reports/players', async (req, res) => {
   const reports = await kv.getByPrefix('rol_preport_');
   res.json({ success: true, reports });
@@ -304,7 +302,6 @@ app.post('/admin/action', async (req, res) => {
   res.json({ success: true });
 });
 
-// NEW FIX: Admin Adjust Premium Gold
 app.post('/admin/adjust-gold', async (req, res) => {
   const user = getAuthUser(req);
   if (!user || user.email !== ADMIN_EMAIL) return res.status(403).json({ error: "Unauthorized. Admin only." });
@@ -354,7 +351,7 @@ app.get('/store/inventory', async (req, res) => {
   const userId = user ? user.id : null;
 
   let userVault = [];
-  let premiumGold = 0; // NEW FIX: Include premium gold in inventory
+  let premiumGold = 0;
   if (userId) {
     userVault = await kv.get(`rol_vault_${userId}`) || [];
     premiumGold = await kv.get(`rol_premium_gold_${userId}`) || 0;
@@ -397,7 +394,6 @@ app.post('/store/verify-rc-purchase', async (req, res) => {
 
   const { userId, type, goldAmount, transactionId, productId } = req.body;
 
-  // Security check
   if (user.id !== userId) return res.status(403).json({ error: "User ID mismatch" });
 
   try {
@@ -408,7 +404,6 @@ app.post('/store/verify-rc-purchase', async (req, res) => {
       console.log(`[STORE] Player ${userId} bought ${goldAmount} Premium Gold via Google Play! (Tx: ${transactionId})`);
     }
     else if (type === "vip") {
-      // Grant 30 days of VIP
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 30);
 
@@ -556,8 +551,6 @@ app.get('/store/vault', async (req, res) => {
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
   let userVault = await kv.get(`rol_vault_${user.id}`) || [];
-
-  // Flatten the LOOT_ITEMS dictionary to look up the rich data (emoji, name)
   const allLoot = Object.values(LOOT_ITEMS).flat();
 
   const populatedVault = userVault.map((savedItem, index) => {
@@ -578,14 +571,11 @@ app.post('/store/delete-item', async (req, res) => {
   const { itemId } = req.body;
 
   let userVault = await kv.get(`rol_vault_${user.id}`) || [];
-
-  // Find the FIRST matching item and remove it (so we don't delete duplicates)
   const index = userVault.findIndex(v => v.id === itemId);
   if (index !== -1) {
     userVault.splice(index, 1);
     await kv.set(`rol_vault_${user.id}`, userVault);
   }
-
   res.json({ success: true });
 });
 
@@ -615,7 +605,6 @@ app.post('/assets/upload', async (req, res) => {
   if (!assetKey || !base64Data) return res.status(400).json({ error: "Missing image data" });
 
   await kv.set(`rol_asset_${assetKey}`, { assetKey, base64Data, uploadedAt: new Date().toISOString() });
-  console.log(`[ASSETS] Admin uploaded single asset: ${assetKey}`);
   res.json({ success: true, url: base64Data });
 });
 
@@ -639,7 +628,6 @@ app.post('/assets/upload-bulk', async (req, res) => {
       results.push({ assetKey: asset.assetKey, success: false, error: e.message });
     }
   }
-  console.log(`[ASSETS] Admin bulk uploaded ${results.filter(r => r.success).length} assets.`);
   res.json({ success: true, results });
 });
 
@@ -684,7 +672,6 @@ app.get('/friends/list', async (req, res) => {
   const allFriendships = await kv.getByPrefix('rol_friendship_');
   const myFriendships = allFriendships.filter(f => f.requester_id === user.id || f.receiver_id === user.id);
 
-  // Populate friend profiles so the UI shows their names
   for (const f of myFriendships) {
     const friendId = f.requester_id === user.id ? f.receiver_id : f.requester_id;
     const friendRecord = await kv.get(friendId);
@@ -718,13 +705,11 @@ app.delete('/friends/:id', async (req, res) => {
   res.json({ success: true });
 });
 
-// --- CHAT SYSTEM ---
 app.get('/friends/chat/:friendId', async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
   const friendId = req.params.friendId;
 
-  // Create a unique conversation ID by sorting the two user IDs
   const convoId = [user.id, friendId].sort().join('_');
   const chatHistory = await kv.get(`rol_chat_${convoId}`) || [];
 
@@ -753,9 +738,6 @@ app.post('/friends/chat', async (req, res) => {
   res.json({ success: true, message: newMessage });
 });
 
-// ============================================================
-// DUMMY CATCH-ALLS (Silences frontend 404/telemetry errors)
-// ============================================================
 app.get('/texture-tuner', (req, res) => res.json({ success: true, value: null }));
 app.get('/custom-maps/list', (req, res) => res.json({ success: true, maps: [] }));
 app.get('/admin/ban-check/:userId', async (req, res) => {
@@ -777,7 +759,6 @@ app.post('/save-game', async (req, res) => {
     level: saveData.character?.level || 1, turnCount: saveData.turnCount || 1,
     savedAt: new Date().toISOString(),
   });
-  console.log(`[SAVE] Game saved locally: ${saveId}`);
   res.json({ success: true, saveId });
 });
 
@@ -789,7 +770,6 @@ app.get('/list-saves', async (req, res) => {
 app.get('/load-game/:saveId', async (req, res) => {
   const saveData = await kv.get(`rol_save_${req.params.saveId}`);
   if (!saveData) return res.status(404).json({ error: "Save not found" });
-  console.log(`[LOAD] Game loaded locally: ${req.params.saveId}`);
   res.json({ success: true, saveData });
 });
 
@@ -800,18 +780,26 @@ app.delete('/delete-save/:saveId', async (req, res) => {
 });
 
 // ============================================================
-// MULTIPLAYER LOBBIES & WEGO POLLING
+// MULTIPLAYER LOBBIES & TACTICAL INITIATIVE WEGO POLLING
 // ============================================================
 app.post('/sessions/create', async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
   const { sessionName, maxPlayers } = req.body;
   const sessionId = `mp_${Date.now()}`;
+
   const session = {
     id: sessionId, name: sessionName || `${user.email.split("@")[0]}'s Game`,
     hostId: user.id, maxPlayers: maxPlayers || 4,
     players: [{ userId: user.id, email: user.email, isHost: true, joinedAt: new Date().toISOString() }],
-    status: "lobby", turnCount: 0, currentPlayerIndex: 0, actionLog: [], chatMessages: [],
+    status: "lobby", turnCount: 0,
+
+    // WEGO INITIATIVE SYSTEM
+    initiativeOrder: [],
+    planningIndex: 0,
+    ghostActions: {},
+
+    actionLog: [], chatMessages: [],
     createdAt: new Date().toISOString()
   };
   await kv.set(`rol_session_${sessionId}`, session);
@@ -826,7 +814,6 @@ app.get('/sessions', async (req, res) => {
   res.json({ success: true, sessions: active });
 });
 
-// THE FIX: ADDED MISSING GET SESSION ENDPOINT
 app.get('/sessions/:sessionId', async (req, res) => {
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -842,7 +829,6 @@ app.post('/sessions/:sessionId/join', async (req, res) => {
     session.players.push({ userId: user.id, email: user.email, isHost: false, joinedAt: new Date().toISOString() });
     await kv.set(`rol_session_${session.id}`, session);
 
-    // update index player count
     const idx = await kv.get(`rol_session_idx_${session.id}`);
     if (idx) {
       idx.playerCount = session.players.length;
@@ -854,7 +840,19 @@ app.post('/sessions/:sessionId/join', async (req, res) => {
 
 app.post('/sessions/:sessionId/start', async (req, res) => {
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
-  session.status = "active"; session.turnCount = 1;
+  session.status = "active";
+  session.turnCount = 1;
+
+  // THE WEGO FIX: ROLL D20 INITIATIVE!
+  const rolls = session.players.map(p => ({
+    userId: p.userId,
+    roll: Math.floor(Math.random() * 20) + 1
+  })).sort((a, b) => a.roll - b.roll); // Lowest rolls first (blind), highest rolls last (perfect info)
+
+  session.initiativeOrder = rolls;
+  session.planningIndex = 0;
+  session.ghostActions = {};
+
   await kv.set(`rol_session_${session.id}`, session);
   await kv.set(`rol_session_idx_${session.id}`, { id: session.id, status: "active" });
   res.json({ success: true, session });
@@ -862,18 +860,43 @@ app.post('/sessions/:sessionId/start', async (req, res) => {
 
 app.post('/sessions/:sessionId/action', async (req, res) => {
   const user = getAuthUser(req);
-  const { action, stateSnapshot } = req.body;
+  const { action, stateSnapshot, ghostPath } = req.body;
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
+
   const actionEntry = { playerId: user.id, action, seq: session.actionLog.length };
   session.actionLog.push(actionEntry);
+
   if (action.type === "END_TURN") {
-    session.currentPlayerIndex = (session.currentPlayerIndex + 1) % session.players.length;
-    session.turnCount += 1;
+    // 1. SAVE THE GHOST PATH FOR OTHERS TO SEE
+    if (!session.ghostActions) session.ghostActions = {};
+    session.ghostActions[user.id] = ghostPath || [];
+
+    // 2. ADVANCE THE PLANNING QUEUE
+    session.planningIndex = (session.planningIndex || 0) + 1;
+
     if (stateSnapshot) {
       if (!session.playerStates) session.playerStates = {};
-      session.playerStates[user.id] = { snapshot: stateSnapshot, turnCount: session.turnCount - 1 };
+      session.playerStates[user.id] = { snapshot: stateSnapshot, turnCount: session.turnCount };
+    }
+
+    // 3. IF EVERYONE HAS LOCKED IN, EXECUTE THE TURN AND REROLL!
+    if (session.planningIndex >= session.players.length) {
+      session.turnCount += 1;
+
+      // Reroll initiative for the new turn
+      const rolls = session.players.map(p => ({
+        userId: p.userId,
+        roll: Math.floor(Math.random() * 20) + 1
+      })).sort((a, b) => a.roll - b.roll);
+
+      session.initiativeOrder = rolls;
+      session.planningIndex = 0;
+
+      // Do NOT clear ghost actions immediately here, let the clients fetch them once so they can physically move the tokens,
+      // but log that the turn actually advanced.
     }
   }
+
   await kv.set(`rol_session_${session.id}`, session);
   res.json({ success: true, session });
 });
@@ -882,11 +905,22 @@ app.get('/sessions/:sessionId/poll', async (req, res) => {
   const since = parseInt(req.query.since || "0", 10);
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
   if (!session) return res.status(404).json({ error: "Not found" });
+
   res.json({
-    success: true, actions: session.actionLog.filter(a => a.seq >= since),
-    currentPlayerIndex: session.currentPlayerIndex, turnCount: session.turnCount,
-    status: session.status, players: session.players, playerStates: session.playerStates || {},
-    chatMessages: session.chatMessages || [], competitiveMode: session.competitiveMode || false
+    success: true,
+    actions: session.actionLog.filter(a => a.seq >= since),
+
+    // THE WEGO FIX: Expose the Initiative Queue to the UI
+    initiativeOrder: session.initiativeOrder || [],
+    planningIndex: session.planningIndex || 0,
+    ghostActions: session.ghostActions || {},
+
+    turnCount: session.turnCount,
+    status: session.status,
+    players: session.players,
+    playerStates: session.playerStates || {},
+    chatMessages: session.chatMessages || [],
+    competitiveMode: session.competitiveMode || false
   });
 });
 
@@ -913,7 +947,6 @@ app.put('/sessions/:sessionId/settings', async (req, res) => {
   }
 });
 
-// THE FIX: ADDED LEAVE/DISBAND/DELETE ROUTES FOR COMPLETE LOBBY MANAGEMENT
 app.post('/sessions/:sessionId/leave', async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
