@@ -751,31 +751,61 @@ app.use('/rest/v1', (req, res) => res.json([]));
 // SAVE / LOAD SYSTEM
 // ============================================================
 app.post('/save-game', async (req, res) => {
+  // 1. Authenticate the user
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
   const { saveId, saveData } = req.body;
   if (!saveId || !saveData) return res.status(400).json({ error: "Missing data" });
-  await kv.set(`rol_save_${saveId}`, saveData);
-  await kv.set(`rol_save_index_${saveId}`, {
-    saveId, characterName: saveData.character?.name || "Unknown",
-    level: saveData.character?.level || 1, turnCount: saveData.turnCount || 1,
+
+  // 2. Namespace the save ID so players don't overwrite each other!
+  const namespacedId = `${user.id}_${saveId}`;
+
+  await kv.set(`rol_save_${namespacedId}`, saveData);
+  await kv.set(`rol_save_index_${namespacedId}`, {
+    saveId, // Keep the original ID so the frontend understands it
+    ownerId: user.id, // Tag this save with the actual owner
+    characterName: saveData.character?.name || "Unknown",
+    level: saveData.character?.level || 1,
+    turnCount: saveData.turnCount || 1,
     savedAt: new Date().toISOString(),
   });
+
   res.json({ success: true, saveId });
 });
 
 app.get('/list-saves', async (req, res) => {
-  const saves = await kv.getByPrefix('rol_save_index_');
-  res.json({ success: true, saves });
+  // 1. Authenticate the user
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const allSaves = await kv.getByPrefix('rol_save_index_');
+
+  // 2. Filter out saves that belong to other players!
+  const userSaves = allSaves.filter(s => s.ownerId === user.id);
+
+  res.json({ success: true, saves: userSaves });
 });
 
 app.get('/load-game/:saveId', async (req, res) => {
-  const saveData = await kv.get(`rol_save_${req.params.saveId}`);
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  // 3. Only look for saves owned by this specific user
+  const namespacedId = `${user.id}_${req.params.saveId}`;
+  const saveData = await kv.get(`rol_save_${namespacedId}`);
+
   if (!saveData) return res.status(404).json({ error: "Save not found" });
   res.json({ success: true, saveData });
 });
 
 app.delete('/delete-save/:saveId', async (req, res) => {
-  await kv.del(`rol_save_${req.params.saveId}`);
-  await kv.del(`rol_save_index_${req.params.saveId}`);
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const namespacedId = `${user.id}_${req.params.saveId}`;
+  await kv.del(`rol_save_${namespacedId}`);
+  await kv.del(`rol_save_index_${namespacedId}`);
   res.json({ success: true });
 });
 
