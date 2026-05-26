@@ -1117,6 +1117,52 @@ app.delete('/sessions/:sessionId', async (req, res) => {
   res.json({ success: true });
 });
 
+// ============================================================
+// CHARACTER PRESETS (1 for Normal, 2 for VIP)
+// ============================================================
+app.get('/presets/list', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  // Returns an array of up to 2 slots
+  const presets = await kv.get(`rol_presets_${user.id}`) || [null, null];
+  res.json({ success: true, presets });
+});
+
+app.post('/presets/save', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const { presetName, characterData, slotIndex } = req.body;
+
+  if (slotIndex !== 0 && slotIndex !== 1) {
+    return res.status(400).json({ error: "Invalid preset slot." });
+  }
+
+  // ENFORCE VIP RULES
+  let isVip = false;
+  const vipData = await kv.get(`rol_vip_${user.id}`);
+  if (vipData && vipData.active) isVip = true;
+
+  if (slotIndex === 1 && !isVip) {
+    return res.status(403).json({ error: "Slot 2 is reserved for VIP Grandmasters." });
+  }
+
+  let presets = await kv.get(`rol_presets_${user.id}`) || [null, null];
+
+  // Ensure array structure is intact
+  if (presets.length < 2) presets = [presets[0] || null, null];
+
+  presets[slotIndex] = {
+    name: presetName || "Quick Start",
+    character: characterData,
+    savedAt: new Date().toISOString()
+  };
+
+  await kv.set(`rol_presets_${user.id}`, presets);
+  res.json({ success: true, presets });
+});
+
 app.use((req, res) => {
   res.json({ success: true, dummy: true, data: [] });
 });
