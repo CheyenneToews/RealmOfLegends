@@ -1,9 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// THE GAME MASTER
+const ADMIN_EMAIL = "cheyennetoews@gmail.com";
 
 // Middleware - THE ULTIMATE WILDCARD
 app.use(cors());
@@ -12,6 +17,7 @@ app.use(express.json({ limit: '50mb' }));
 // ============================================================
 // SQLITE KEY-VALUE STORE
 // ============================================================
+// THE FIX: Pointing to the indestructible Render Persistent Disk!
 const db = new sqlite3.Database('/data/game_data.db');
 
 db.serialize(() => {
@@ -54,8 +60,6 @@ const kv = {
 // ============================================================
 // REAL AUTHENTICATION & EMAIL SYSTEM
 // ============================================================
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 
 // 1. Configure the Email Sender 
 const transporter = nodemailer.createTransport({
@@ -85,7 +89,7 @@ async function trackUser(email, displayName = null, password = null) {
   const userId = `user_${email}`;
   let userRecord = await kv.get(userId);
 
-  // THE FIX: Dynamic Admin System initialization
+  // Dynamic Admin System initialization
   let admins = await kv.get('rol_admins');
   if (!admins) {
     admins = ["cheyennetoews@gmail.com", "primedchronicoms@gmail.com"];
@@ -385,7 +389,6 @@ app.post('/admin/reports/bugs/status', async (req, res) => {
   res.json({ success: true });
 });
 
-// --- ADMIN ACTIONS ---
 app.post('/admin/toggle-vip', async (req, res) => {
   const admin = await verifyAdmin(req, res); if (!admin) return;
   const { userId, active } = req.body;
@@ -441,7 +444,6 @@ app.post('/store/dev-grant-vip', async (req, res) => {
   const admin = await verifyAdmin(req, res); if (!admin) return;
   const { userId } = req.body;
 
-  // Sets used boxes to 7, so they have exactly 3 left out of their 10 limit!
   await kv.set(`rol_vip_${userId}`, { active: true, tier: "Dev", lootBoxesUsedThisWeek: 7, totalLootBoxesOpened: 0, loyaltyMonths: 5, grantedAt: new Date().toISOString() });
   await logAdminActivity("grant_vip", admin.email, `Granted Dev VIP & Lootboxes to ${userId}`, userId);
   res.json({ success: true });
@@ -521,7 +523,7 @@ app.post('/reports/bugs', async (req, res) => {
 });
 
 // ============================================================
-// STORE INVENTORY
+// STORE INVENTORY & SECURE TRANSACTIONS
 // ============================================================
 app.get('/store/vip-status', async (req, res) => {
   const userId = req.query.userId;
@@ -558,9 +560,7 @@ app.get('/store/inventory', async (req, res) => {
   res.json({ success: true, store: localStore, premiumGold });
 });
 
-// ============================================================
-// SECURE STORE TRANSACTIONS
-// ============================================================
+// THE FIX: Secure Store Transactions Processor
 const processStoreTransaction = async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
@@ -598,6 +598,7 @@ const processStoreTransaction = async (req, res) => {
 // Catch both endpoints just to be safe!
 app.post('/store/buy', processStoreTransaction);
 app.post('/store/purchase', processStoreTransaction);
+
 
 // ============================================================
 // GOOGLE PLAY BILLING / STORE PURCHASES
@@ -1185,6 +1186,54 @@ app.post('/presets/save', async (req, res) => {
   await kv.set(`rol_presets_${user.id}`, presets);
   res.json({ success: true, presets });
 });
+
+// ============================================================
+// CUSTOM MAPS / CAMPAIGNS & AI SCRIPTS (Restored)
+// ============================================================
+app.get('/custom-maps/list', (req, res) => res.json({ success: true, maps: [] }));
+
+app.get('/ai-scripts/list', async (req, res) => {
+  const guestId = req.query.guestId || "admin";
+  const scripts = await kv.getByPrefix(`rol_ai_${guestId}_`);
+  res.json({ success: true, scripts });
+});
+
+app.post('/ai-scripts/save', async (req, res) => {
+  const { script, guestId } = req.body;
+  if (!script || !script.id) return res.status(400).json({ error: "Missing script data" });
+  const gid = guestId || "admin";
+  await kv.set(`rol_ai_${gid}_${script.id}`, script);
+  res.json({ success: true });
+});
+
+app.delete('/ai-scripts/:id', async (req, res) => {
+  const guestId = req.query.guestId || "admin";
+  await kv.del(`rol_ai_${guestId}_${req.params.id}`);
+  res.json({ success: true });
+});
+
+app.get('/campaigns/list', async (req, res) => {
+  const ownerId = req.query.userId || req.query.guestId || "anonymous";
+  const campaigns = await kv.getByPrefix(`rol_camp_${ownerId}_`);
+  res.json({ success: true, campaigns });
+});
+
+app.post('/campaigns/save', async (req, res) => {
+  const { campaign, userId, guestId } = req.body;
+  if (!campaign || !campaign.id) return res.status(400).json({ error: "Missing data" });
+  const ownerId = userId || guestId || "anonymous";
+  await kv.set(`rol_camp_${ownerId}_${campaign.id}`, campaign);
+  res.json({ success: true });
+});
+
+app.delete('/campaigns/:id', async (req, res) => {
+  const ownerId = req.query.userId || req.query.guestId || "anonymous";
+  await kv.del(`rol_camp_${ownerId}_${req.params.id}`);
+  res.json({ success: true });
+});
+
+app.get('/texture-tuner', (req, res) => res.json({ success: true, value: null }));
+app.use('/rest/v1', (req, res) => res.json([]));
 
 app.use((req, res) => {
   res.json({ success: true, dummy: true, data: [] });
