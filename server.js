@@ -15,7 +15,8 @@ app.use(express.json({ limit: '50mb' }));
 // ============================================================
 // SQLITE KEY-VALUE STORE
 // ============================================================
-const db = new sqlite3.Database('./game_data.db');
+// THE FIX: Pointing to the indestructible Render Persistent Disk!
+const db = new sqlite3.Database('/data/game_data.db');
 
 db.serialize(() => {
   db.run("CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)");
