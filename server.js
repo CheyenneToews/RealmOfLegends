@@ -56,9 +56,36 @@ const kv = {
 };
 
 // ============================================================
-// LOCAL USER TRACKING SYSTEM
+// REAL AUTHENTICATION & EMAIL SYSTEM
 // ============================================================
-async function trackUser(email, displayName = null) {
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+
+// 1. Configure the Email Sender 
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'primedchronicoms@gmail.com',
+    pass: 'emimifbxctfmpcjc' // <--- Boom. Locked in.
+  }
+});
+
+// 2. Password Security Helpers
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash) return true; // Allows old accounts to login once to migrate
+  const [salt, key] = storedHash.split(':');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return key === hash;
+}
+
+// 3. User Tracking (Upgraded to handle passwords)
+async function trackUser(email, displayName = null, password = null) {
   const userId = `user_${email}`;
   let userRecord = await kv.get(userId);
   const isGameMaster = email === ADMIN_EMAIL;
@@ -68,6 +95,7 @@ async function trackUser(email, displayName = null) {
       id: userId,
       email: email,
       displayName: displayName || email.split('@')[0],
+      passwordHash: password ? hashPassword(password) : null,
       createdAt: new Date().toISOString(),
       lastSignIn: new Date().toISOString(),
       emailConfirmed: true,
@@ -78,7 +106,7 @@ async function trackUser(email, displayName = null) {
       banReason: null,
       purchasedSkins: 0
     };
-    console.log(`[DATABASE] New local account registered: ${email}`);
+    console.log(`[DATABASE] New account registered: ${email}`);
 
     if (isGameMaster) {
       await kv.set(`rol_vip_${userId}`, {
@@ -89,32 +117,53 @@ async function trackUser(email, displayName = null) {
     }
   } else {
     userRecord.lastSignIn = new Date().toISOString();
+    // Seamless migration for old accounts: hashes password on first new login
+    if (password && !userRecord.passwordHash) {
+      userRecord.passwordHash = hashPassword(password);
+      console.log(`[AUTH] Legacy account ${email} locked with new password.`);
+    }
   }
 
   await kv.set(userId, userRecord);
   return userRecord;
 }
 
-// ============================================================
-// SUPABASE AUTH IMPOSTER
-// ============================================================
-app.post('/auth/v1/token', async (req, res) => {
-  const email = req.body?.email || "local@player.com";
+// 4. The Auth Endpoints
+app.post('/auth/v1/signup', async (req, res) => {
+  const email = req.body?.email;
+  const password = req.body?.password;
+  const name = req.body?.name || email.split('@')[0];
+
+  if (!email || !password) return res.status(400).json({ error: "Email and password required." });
+
+  const existingUser = await kv.get(`user_${email}`);
+  if (existingUser) return res.status(400).json({ error: "Account already exists." });
+
+  await trackUser(email, name, password);
   const token = Buffer.from(email).toString('base64');
-  await trackUser(email);
-  console.log(`[AUTH] Player logged in: ${email}`);
+
   res.json({
     access_token: token, token_type: "bearer", expires_in: 360000, refresh_token: token,
     user: { id: `user_${email}`, aud: "authenticated", role: "authenticated", email: email }
   });
 });
 
-app.post('/auth/v1/signup', async (req, res) => {
-  const email = req.body?.email || "local@player.com";
-  const name = req.body?.name || email.split('@')[0];
+app.post('/auth/v1/token', async (req, res) => {
+  const email = req.body?.email;
+  const password = req.body?.password;
+
+  if (!email || !password) return res.status(400).json({ error: "Email and password required." });
+
+  let userRecord = await kv.get(`user_${email}`);
+  if (!userRecord) return res.status(400).json({ error: "Invalid credentials." });
+
+  if (!verifyPassword(password, userRecord.passwordHash)) {
+    return res.status(400).json({ error: "Invalid credentials." });
+  }
+
+  await trackUser(email, null, password);
+
   const token = Buffer.from(email).toString('base64');
-  await trackUser(email, name);
-  console.log(`[AUTH] New Player created account: ${email}`);
   res.json({
     access_token: token, token_type: "bearer", expires_in: 360000, refresh_token: token,
     user: { id: `user_${email}`, aud: "authenticated", role: "authenticated", email: email }
@@ -133,6 +182,62 @@ function getAuthUser(req) {
   const email = Buffer.from(token, 'base64').toString('utf8');
   return { id: `user_${email}`, email: email };
 }
+
+// ============================================================
+// PASSWORD RECOVERY ENDPOINTS
+// ============================================================
+app.post('/auth/v1/recover', async (req, res) => {
+  const email = req.body?.email;
+  if (!email) return res.status(400).json({ error: "Email required." });
+
+  const userRecord = await kv.get(`user_${email}`);
+  if (!userRecord) {
+    // Return success anyway to prevent hackers from scanning for valid emails
+    return res.json({ success: true, message: "If an account exists, a reset link was sent." });
+  }
+
+  // Generate a 6-digit PIN
+  const pin = Math.floor(100000 + Math.random() * 900000).toString();
+  await kv.set(`reset_pin_${email}`, { pin, expires: Date.now() + 15 * 60 * 1000 }); // 15 mins
+
+  const mailOptions = {
+    from: '"Realm of Legends Support" <primedchronicoms@gmail.com>',
+    to: email,
+    subject: 'Password Reset PIN',
+    text: `Your password reset PIN is: ${pin}\n\nThis PIN will expire in 15 minutes. If you did not request this, please ignore this email.`,
+    html: `<h3>Realm of Legends Password Reset</h3><p>Your password reset PIN is: <strong style="font-size: 24px;">${pin}</strong></p><p>This PIN will expire in 15 minutes. If you did not request this, please ignore this email.</p>`
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[AUTH] Password reset email sent to ${email}`);
+    res.json({ success: true, message: "Reset email sent." });
+  } catch (error) {
+    console.error("[AUTH] Error sending email:", error);
+    res.status(500).json({ error: "Failed to send email." });
+  }
+});
+
+app.post('/auth/v1/update', async (req, res) => {
+  const { email, pin, newPassword } = req.body;
+  if (!email || !pin || !newPassword) return res.status(400).json({ error: "Email, PIN, and new password required." });
+
+  const resetData = await kv.get(`reset_pin_${email}`);
+  if (!resetData || resetData.pin !== pin || Date.now() > resetData.expires) {
+    return res.status(400).json({ error: "Invalid or expired PIN." });
+  }
+
+  let userRecord = await kv.get(`user_${email}`);
+  if (userRecord) {
+    userRecord.passwordHash = hashPassword(newPassword);
+    await kv.set(`user_${email}`, userRecord);
+    await kv.del(`reset_pin_${email}`);
+    console.log(`[AUTH] Password successfully reset for ${email}`);
+    res.json({ success: true, message: "Password updated successfully." });
+  } else {
+    res.status(400).json({ error: "Account not found." });
+  }
+});
 
 // ============================================================
 // ADMIN & VIP SYSTEM
