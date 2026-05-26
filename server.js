@@ -558,16 +558,46 @@ app.get('/store/inventory', async (req, res) => {
   res.json({ success: true, store: localStore, premiumGold });
 });
 
-app.post('/store/buy', async (req, res) => {
+// ============================================================
+// SECURE STORE TRANSACTIONS
+// ============================================================
+const processStoreTransaction = async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
-  const { itemId, price } = req.body;
+
+  // Support both naming conventions depending on frontend setup
+  const itemId = req.body.itemId || req.body.skinId;
+  const cost = parseInt(req.body.price) || 0;
+
+  if (!itemId) return res.status(400).json({ error: "Missing item ID" });
+
+  // 1. Check the player's wallet
+  let currentGold = await kv.get(`rol_premium_gold_${user.id}`) || 0;
+
+  if (currentGold < cost) {
+    return res.status(400).json({ error: "Not enough Premium Gold!" });
+  }
+
+  // 2. Prevent duplicate purchases
   let userVault = await kv.get(`rol_vault_${user.id}`) || [];
+  if (userVault.find(v => v.id === itemId)) {
+    return res.status(400).json({ error: "You already own this item!" });
+  }
+
+  // 3. Deduct Gold & Add to Vault
+  currentGold -= cost;
+  await kv.set(`rol_premium_gold_${user.id}`, currentGold);
+
   userVault.push({ id: itemId, acquiredAt: new Date().toISOString() });
   await kv.set(`rol_vault_${user.id}`, userVault);
-  res.json({ success: true, message: "Item purchased successfully!" });
-});
 
+  console.log(`[STORE] ${user.email} purchased ${itemId} for ${cost} gold. Balance: ${currentGold}`);
+  res.json({ success: true, message: "Item purchased successfully!", premiumGold: currentGold });
+};
+
+// Catch both endpoints just to be safe!
+app.post('/store/buy', processStoreTransaction);
+app.post('/store/purchase', processStoreTransaction);
 
 // ============================================================
 // GOOGLE PLAY BILLING / STORE PURCHASES
