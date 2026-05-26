@@ -551,7 +551,8 @@ app.get('/store/inventory', async (req, res) => {
       { id: "item_relic_forge_hammer", name: "Forge Master's Hammer", type: "item", price: 250, currency: "gold", rarity: "epic" }
     ],
     lootBoxes: 10,
-    purchasedSkins: ownedItems.filter(id => id.startsWith('skin_')),
+    // THE FIX: Exposing castles and heroes to the frontend's "owned" array!
+    purchasedSkins: ownedItems.filter(id => id.startsWith('skin_') || id.startsWith('castle_') || id.startsWith('hero_')),
     unlockedClasses: ownedItems.filter(id => id.startsWith('class_')),
     unlockedRaces: ownedItems.filter(id => id.startsWith('race_')),
     purchasedItems: ownedItems,
