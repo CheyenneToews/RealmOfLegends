@@ -770,9 +770,17 @@ app.get('/store/vault', async (req, res) => {
   const allLoot = Object.values(LOOT_ITEMS).flat();
 
   const populatedVault = userVault.map((savedItem, index) => {
-    const itemData = allLoot.find(i => i.id === savedItem.id) || { name: "Unknown Item", emoji: "📦", type: "item" };
+    const itemData = allLoot.find(i => i.id === savedItem.id);
+
+    // THE FIX: Dynamically generate Store items if they aren't in the standard loot pool!
+    const finalData = itemData || {
+      name: savedItem.id.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      emoji: savedItem.id.startsWith('castle_') ? '🏰' : savedItem.id.startsWith('skin_') ? '👕' : '👑',
+      type: savedItem.id.startsWith('castle_') || savedItem.id.startsWith('skin_') || savedItem.id.startsWith('hero_') ? 'skin' : 'item'
+    };
+
     return {
-      ...itemData,
+      ...finalData,
       id: savedItem.id, // The raw ID
       _uid: `${savedItem.id}-${savedItem.acquiredAt}-${index}` // Unique ID for React & Deletion
     };
