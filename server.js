@@ -772,11 +772,15 @@ app.get('/store/vault', async (req, res) => {
   const populatedVault = userVault.map((savedItem, index) => {
     const itemData = allLoot.find(i => i.id === savedItem.id);
 
-    // THE FIX: Dynamically generate Store items if they aren't in the standard loot pool!
+    // THE FIX: Properly identifying both 'castle_' and 'rcastle_' as skins!
+    const isCastle = savedItem.id.startsWith('castle_') || savedItem.id.startsWith('rcastle_');
+    const isSkin = savedItem.id.startsWith('skin_') || savedItem.id.startsWith('hero_');
+
     const finalData = itemData || {
-      name: savedItem.id.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-      emoji: savedItem.id.startsWith('castle_') ? '🏰' : savedItem.id.startsWith('skin_') ? '👕' : '👑',
-      type: savedItem.id.startsWith('castle_') || savedItem.id.startsWith('skin_') || savedItem.id.startsWith('hero_') ? 'skin' : 'item'
+      // Strips out prefixes and capitalizes the words nicely
+      name: savedItem.id.replace(/r?castle_/, '').replace(/skin_|hero_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      emoji: isCastle ? '🏰' : isSkin ? '👕' : '👑',
+      type: isCastle || isSkin ? 'skin' : 'item'
     };
 
     return {
