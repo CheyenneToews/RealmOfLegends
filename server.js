@@ -593,6 +593,7 @@ app.post('/store/equip', async (req, res) => {
   });
 });
 
+// THE FIX: Secure Store Transactions Processor
 const processStoreTransaction = async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
@@ -617,7 +618,23 @@ const processStoreTransaction = async (req, res) => {
   await kv.set(`rol_vault_${user.id}`, userVault);
 
   console.log(`[STORE] ${user.email} purchased ${itemId} for ${cost} gold. Balance: ${currentGold}`);
-  res.json({ success: true, message: "Item purchased successfully!", premiumGold: currentGold });
+
+  // THE FIX: Fetch the current cosmetics and map the vault so we can send it to the UI!
+  let cosmetics = await kv.get(`rol_cosmetics_${user.id}`) || { castleId: 'castle_default', skinId: 'skin_default' };
+  const ownedItems = userVault.map(v => typeof v === 'string' ? v : v.id);
+
+  // Return the `store` object so the frontend instantly switches the button to "Equip"
+  res.json({
+    success: true,
+    message: "Item purchased successfully!",
+    premiumGold: currentGold,
+    store: {
+      purchasedItems: ownedItems,
+      ownedItems: ownedItems,
+      equippedCastle: cosmetics.castleId,
+      equippedHero: cosmetics.skinId
+    }
+  });
 };
 
 app.post('/store/buy', processStoreTransaction);
