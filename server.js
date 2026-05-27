@@ -538,11 +538,16 @@ app.get('/store/inventory', async (req, res) => {
 
   let userVault = [];
   let premiumGold = 0;
+  let cosmetics = { castleId: 'castle_default', skinId: 'skin_default' };
+
   if (userId) {
     userVault = await kv.get(`rol_vault_${userId}`) || [];
     premiumGold = await kv.get(`rol_premium_gold_${userId}`) || 0;
+    const savedCosmetics = await kv.get(`rol_cosmetics_${userId}`);
+    if (savedCosmetics) cosmetics = savedCosmetics;
   }
-  const ownedItems = userVault.map(v => v.id);
+
+  const ownedItems = userVault.map(v => typeof v === 'string' ? v : v.id);
 
   const localStore = {
     lastRefresh: Date.now(),
@@ -551,41 +556,60 @@ app.get('/store/inventory', async (req, res) => {
       { id: "item_relic_forge_hammer", name: "Forge Master's Hammer", type: "item", price: 250, currency: "gold", rarity: "epic" }
     ],
     lootBoxes: 10,
-    // THE FIX: Exposing castles and heroes to the frontend's "owned" array!
-    purchasedSkins: ownedItems.filter(id => id.startsWith('skin_') || id.startsWith('castle_') || id.startsWith('hero_')),
+    purchasedSkins: ownedItems.filter(id => id.startsWith('skin_') || id.startsWith('castle_') || id.startsWith('hero_') || id.startsWith('rcastle_')),
     unlockedClasses: ownedItems.filter(id => id.startsWith('class_')),
     unlockedRaces: ownedItems.filter(id => id.startsWith('race_')),
     purchasedItems: ownedItems,
-    ownedItems: ownedItems
+    ownedItems: ownedItems,
+    equippedCastle: cosmetics.castleId,
+    equippedHero: cosmetics.skinId
   };
   res.json({ success: true, store: localStore, premiumGold });
 });
 
-// THE FIX: Secure Store Transactions Processor
+app.post('/store/equip', async (req, res) => {
+  const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const { skinId, category, action } = req.body;
+  let cosmetics = await kv.get(`rol_cosmetics_${user.id}`) || { castleId: 'castle_default', skinId: 'skin_default' };
+
+  if (action === "equip") {
+    if (category === "castle") cosmetics.castleId = skinId;
+    if (category === "hero") cosmetics.skinId = skinId;
+  } else if (action === "unequip") {
+    if (category === "castle") cosmetics.castleId = 'castle_default';
+    if (category === "hero") cosmetics.skinId = 'skin_default';
+  }
+
+  await kv.set(`rol_cosmetics_${user.id}`, cosmetics);
+
+  let userVault = await kv.get(`rol_vault_${user.id}`) || [];
+  const ownedItems = userVault.map(v => typeof v === 'string' ? v : v.id);
+
+  res.json({
+    success: true,
+    store: { purchasedItems: ownedItems, ownedItems: ownedItems, equippedCastle: cosmetics.castleId, equippedHero: cosmetics.skinId }
+  });
+});
+
 const processStoreTransaction = async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-  // Support both naming conventions depending on frontend setup
-  const itemId = req.body.itemId || req.body.skinId;
-  const cost = parseInt(req.body.price) || 0;
+  const itemId = req.body.itemId || req.body.skinId || req.body.id;
+  const cost = parseInt(req.body.price) || parseInt(req.body.cost) || parseInt(req.body.amount) || 0;
 
   if (!itemId) return res.status(400).json({ error: "Missing item ID" });
+  if (cost <= 0) return res.status(400).json({ error: "Store error: Invalid item price! Transaction blocked." });
 
-  // 1. Check the player's wallet
   let currentGold = await kv.get(`rol_premium_gold_${user.id}`) || 0;
+  if (currentGold < cost) return res.status(400).json({ error: "Not enough Premium Gold!" });
 
-  if (currentGold < cost) {
-    return res.status(400).json({ error: "Not enough Premium Gold!" });
-  }
-
-  // 2. Prevent duplicate purchases
   let userVault = await kv.get(`rol_vault_${user.id}`) || [];
-  if (userVault.find(v => v.id === itemId)) {
-    return res.status(400).json({ error: "You already own this item!" });
-  }
+  const isOwned = userVault.some(v => (typeof v === 'string' ? v : v.id) === itemId);
+  if (isOwned) return res.status(400).json({ error: "You already own this item!" });
 
-  // 3. Deduct Gold & Add to Vault
   currentGold -= cost;
   await kv.set(`rol_premium_gold_${user.id}`, currentGold);
 
@@ -596,7 +620,6 @@ const processStoreTransaction = async (req, res) => {
   res.json({ success: true, message: "Item purchased successfully!", premiumGold: currentGold });
 };
 
-// Catch both endpoints just to be safe!
 app.post('/store/buy', processStoreTransaction);
 app.post('/store/purchase', processStoreTransaction);
 
@@ -770,23 +793,24 @@ app.get('/store/vault', async (req, res) => {
   const allLoot = Object.values(LOOT_ITEMS).flat();
 
   const populatedVault = userVault.map((savedItem, index) => {
-    const itemData = allLoot.find(i => i.id === savedItem.id);
+    // Crash Protection for old string data!
+    const rawId = typeof savedItem === 'string' ? savedItem : (savedItem?.id || 'unknown');
+    const acquiredAt = typeof savedItem === 'string' ? new Date().toISOString() : (savedItem?.acquiredAt || new Date().toISOString());
 
-    // THE FIX: Properly identifying both 'castle_' and 'rcastle_' as skins!
-    const isCastle = savedItem.id.startsWith('castle_') || savedItem.id.startsWith('rcastle_');
-    const isSkin = savedItem.id.startsWith('skin_') || savedItem.id.startsWith('hero_');
+    const itemData = allLoot.find(i => i.id === rawId);
+    const isCastle = rawId.startsWith('castle_') || rawId.startsWith('rcastle_');
+    const isSkin = rawId.startsWith('skin_') || rawId.startsWith('hero_');
 
     const finalData = itemData || {
-      // Strips out prefixes and capitalizes the words nicely
-      name: savedItem.id.replace(/r?castle_/, '').replace(/skin_|hero_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      name: rawId.replace(/r?castle_/, '').replace(/skin_|hero_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
       emoji: isCastle ? '🏰' : isSkin ? '👕' : '👑',
       type: isCastle || isSkin ? 'skin' : 'item'
     };
 
     return {
       ...finalData,
-      id: savedItem.id, // The raw ID
-      _uid: `${savedItem.id}-${savedItem.acquiredAt}-${index}` // Unique ID for React & Deletion
+      id: rawId,
+      _uid: `${rawId}-${acquiredAt}-${index}`
     };
   });
 
@@ -799,7 +823,7 @@ app.post('/store/delete-item', async (req, res) => {
   const { itemId } = req.body;
 
   let userVault = await kv.get(`rol_vault_${user.id}`) || [];
-  const index = userVault.findIndex(v => v.id === itemId);
+  const index = userVault.findIndex(v => (typeof v === 'string' ? v : v.id) === itemId);
   if (index !== -1) {
     userVault.splice(index, 1);
     await kv.set(`rol_vault_${user.id}`, userVault);
