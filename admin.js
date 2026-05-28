@@ -142,11 +142,11 @@ module.exports = () => {
   router.post('/store/dev-grant-vip', async (req, res) => {
     if (!req.isAdmin) return res.status(403).json({ error: "Forbidden." });
 
-    // THE FIX: Changed tier to "Grandmaster" so the React UI recognizes the 10 box limit
+    // THE FIX: Set to -999 to act as an infinite Dev Cheat stash
     await req.kv.set(`rol_vip_${req.body.userId}`, {
       active: true,
       tier: "Grandmaster",
-      lootBoxesUsedThisWeek: 7,
+      lootBoxesUsedThisWeek: -999,
       totalLootBoxesOpened: 0,
       loyaltyMonths: 5,
       grantedAt: new Date().toISOString()
