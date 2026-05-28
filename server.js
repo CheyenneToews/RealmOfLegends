@@ -7,9 +7,6 @@ const nodemailer = require('nodemailer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// THE GAME MASTER
-const ADMIN_EMAIL = "cheyennetoews@gmail.com";
-
 // Middleware - THE ULTIMATE WILDCARD
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -183,10 +180,15 @@ app.get('/auth/v1/user', (req, res) => {
 });
 
 function getAuthUser(req) {
-  const token = req.headers['x-user-token'] || (req.headers.authorization || "").split(" ")[1];
-  if (!token) return null;
-  const email = Buffer.from(token, 'base64').toString('utf8');
-  return { id: `user_${email}`, email: email };
+  try {
+    const token = req.headers['x-user-token'] || (req.headers.authorization || "").split(" ")[1];
+    if (!token) return null;
+    const email = Buffer.from(token, 'base64').toString('utf8');
+    if (!email) return null;
+    return { id: `user_${email}`, email: email };
+  } catch (e) {
+    return null;
+  }
 }
 
 // ============================================================
@@ -593,7 +595,6 @@ app.post('/store/equip', async (req, res) => {
   });
 });
 
-// THE FIX: Secure Store Transactions Processor
 const processStoreTransaction = async (req, res) => {
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
@@ -619,11 +620,9 @@ const processStoreTransaction = async (req, res) => {
 
   console.log(`[STORE] ${user.email} purchased ${itemId} for ${cost} gold. Balance: ${currentGold}`);
 
-  // THE FIX: Fetch the current cosmetics and map the vault so we can send it to the UI!
   let cosmetics = await kv.get(`rol_cosmetics_${user.id}`) || { castleId: 'castle_default', skinId: 'skin_default' };
   const ownedItems = userVault.map(v => typeof v === 'string' ? v : v.id);
 
-  // Return the `store` object so the frontend instantly switches the button to "Equip"
   res.json({
     success: true,
     message: "Item purchased successfully!",
@@ -1071,6 +1070,8 @@ app.post('/sessions/:sessionId/join', async (req, res) => {
 
 app.post('/sessions/:sessionId/start', async (req, res) => {
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+
   session.status = "active";
   session.turnCount = 1;
 
@@ -1090,8 +1091,11 @@ app.post('/sessions/:sessionId/start', async (req, res) => {
 
 app.post('/sessions/:sessionId/action', async (req, res) => {
   const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
   const { action, stateSnapshot, ghostPath } = req.body;
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
+  if (!session) return res.status(404).json({ error: "Session not found" });
 
   const actionEntry = { playerId: user.id, action, seq: session.actionLog.length };
   session.actionLog.push(actionEntry);
@@ -1144,8 +1148,12 @@ app.get('/sessions/:sessionId/poll', async (req, res) => {
 
 app.post('/sessions/:sessionId/chat', async (req, res) => {
   const user = getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
   const { message } = req.body;
   const session = await kv.get(`rol_session_${req.params.sessionId}`);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+
   session.chatMessages.push({
     playerId: user.id, playerName: user.email.split('@')[0], message, turn: session.turnCount
   });
