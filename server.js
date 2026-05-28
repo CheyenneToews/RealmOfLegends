@@ -11,7 +11,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // 1. Database Initialization
-const dbPath = fs.existsSync('/data') ? '/data/game_data.db' : './game_data.db';
+// THE FIX: Use Render's official environment variable to prevent Windows C:\data conflicts
+const isRender = process.env.RENDER === 'true';
+const dbPath = isRender ? '/data/game_data.db' : './game_data.db';
 const db = new sqlite3.Database(dbPath);
 db.serialize(() => db.run("CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)"));
 
@@ -33,12 +35,18 @@ const transporter = nodemailer.createTransport({
 app.use(async (req, res, next) => {
   req.kv = kv; // Inject Database into every request
 
-  // Attach User
-  const token = req.headers['x-user-token'] || (req.headers.authorization || "").split(" ")[1];
+  // THE FIX: Enforce Master Directive token parsing
+  let token = req.headers['x-user-token'] || (req.headers.authorization || "").split(" ")[1];
   if (token) {
     try {
+      if (token.startsWith('{')) {
+        const parsed = JSON.parse(token);
+        token = parsed.access_token || token;
+      }
       const email = Buffer.from(token, 'base64').toString('utf8');
-      if (email) req.user = { id: `user_${email}`, email: email };
+      if (email && email.includes('@')) {
+        req.user = { id: `user_${email}`, email: email };
+      }
     } catch (e) { }
   }
 
@@ -51,7 +59,7 @@ app.use(async (req, res, next) => {
 });
 
 // 4. Route Delegation
-app.use('/', require('./routes/auth')(transporter)); // Pass the email sender
+app.use('/', require('./routes/auth')(transporter));
 app.use('/', require('./routes/admin')());
 app.use('/', require('./routes/store')());
 app.use('/', require('./routes/multiplayer')());
