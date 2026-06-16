@@ -11,10 +11,19 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // 1. Database Initialization
-// THE FIX: Use Render's official environment variable to prevent Windows C:\data conflicts
-const isRender = process.env.RENDER === 'true';
-const dbPath = isRender ? '/data/game_data.db' : './game_data.db';
-const db = new sqlite3.Database(dbPath);
+// THE FIX: Use Railway's production environment to point to the persistent volume
+const dbPath = process.env.NODE_ENV === 'production'
+  ? '/app/data/game_data.db'
+  : './game_data.db';
+
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error("Database connection error:", err.message);
+  } else {
+    console.log("Connected to the SQLite database at:", dbPath);
+  }
+});
+
 db.serialize(() => db.run("CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)"));
 
 const kv = {
