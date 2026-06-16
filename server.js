@@ -11,10 +11,13 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // 1. Database Initialization
-// THE FIX: Use Railway's production environment to point to the persistent volume
-const dbPath = process.env.NODE_ENV === 'production'
-  ? '/app/data/game_data.db'
-  : './game_data.db';
+const dbFolder = process.env.NODE_ENV === 'production' ? '/app/data' : '.';
+const dbPath = `${dbFolder}/game_data.db`;
+
+// THE FIX: Force the server to build the folder before starting the database!
+if (!fs.existsSync(dbFolder)) {
+  fs.mkdirSync(dbFolder, { recursive: true });
+}
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
