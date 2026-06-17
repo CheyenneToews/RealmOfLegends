@@ -58,7 +58,6 @@ const transporter = nodemailer.createTransport({
 app.use(async (req, res, next) => {
   req.kv = kv; // Inject Database into every request
 
-  // THE FIX: Enforce Master Directive token parsing
   let token = req.headers['x-user-token'] || (req.headers.authorization || "").split(" ")[1];
   if (token) {
     try {
@@ -73,9 +72,15 @@ app.use(async (req, res, next) => {
     } catch (e) { }
   }
 
-  // Attach Admin Status
+  // THE OVERRIDE: Force repair the database if it forgot you are the Admin
   if (req.user) {
-    let admins = await kv.get('rol_admins') || ["cheyennetoews@gmail.com", "primedchronicoms@gmail.com"];
+    let admins = await kv.get('rol_admins') || [];
+
+    if (!admins.includes("cheyennetoews@gmail.com")) {
+      admins.push("cheyennetoews@gmail.com");
+      await kv.set('rol_admins', admins); // Writes you permanently into the DB
+    }
+
     req.isAdmin = admins.includes(req.user.email);
   }
   next();
