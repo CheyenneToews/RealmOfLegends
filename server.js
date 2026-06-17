@@ -14,9 +14,20 @@ app.use(express.json({ limit: '50mb' }));
 const dbFolder = process.env.NODE_ENV === 'production' ? '/app/data' : '.';
 const dbPath = `${dbFolder}/game_data.db`;
 
-// THE FIX: Force the server to build the folder before starting the database!
+// Force the server to build the folder before starting the database!
 if (!fs.existsSync(dbFolder)) {
   fs.mkdirSync(dbFolder, { recursive: true });
+}
+
+// THE ACCOUNT IMPORTER: Safely move old accounts into the vault
+if (process.env.NODE_ENV === 'production' && fs.existsSync('./import_accounts.data')) {
+  const vaultDbSize = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+
+  // If the vault is virtually empty (under 30kb), import the accounts!
+  if (vaultDbSize < 30000) {
+    fs.copyFileSync('./import_accounts.data', dbPath);
+    console.log("🛡️ Old accounts successfully imported into the permanent vault!");
+  }
 }
 
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -78,4 +89,4 @@ app.use('/', require('./routes/multiplayer')());
 
 app.use((req, res) => res.json({ success: true, dummy: true, data: [] }));
 
-app.listen(PORT, '0.0.0.0', () => console.log(`⚔️ Realm of Legends Modular Server running on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`⚔️ Victors of Valhalla Modular Server running on port ${PORT}`));
