@@ -60,6 +60,16 @@ module.exports = (transporter) => {
     const existingUser = await req.kv.get(`user_${email}`);
     if (existingUser) return res.status(400).json({ error: "Account already exists." });
 
+    // THE FIX: Check if ANY other user already has this display name (case-insensitive)
+    const allUsers = await req.kv.getByPrefix('user_');
+    const nameTaken = allUsers.some(user =>
+      user.displayName && user.displayName.toLowerCase() === name.toLowerCase()
+    );
+
+    if (nameTaken) {
+      return res.status(400).json({ error: "That Game Name is already taken! Please choose another." });
+    }
+
     await trackUser(req, email, name, password);
     const token = Buffer.from(email).toString('base64');
 
@@ -137,6 +147,33 @@ module.exports = (transporter) => {
     } else {
       res.status(400).json({ error: "Account not found." });
     }
+  });
+
+  // ==========================================
+  // ADMIN DASHBOARD: DELETE USER
+  // ==========================================
+  router.post('/auth/v1/admin/delete-user', async (req, res) => {
+    const targetEmail = req.body?.targetEmail;
+
+    if (!targetEmail) {
+      return res.status(400).json({ error: "Target email required." });
+    }
+
+    const targetId = `user_${targetEmail}`;
+    const existingUser = await req.kv.get(targetId);
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found in database." });
+    }
+
+    // Nuke the user and all their associated data to keep the database clean
+    await req.kv.del(targetId);
+    await req.kv.del(`rol_vip_${targetId}`);
+    await req.kv.del(`rol_presets_${targetId}`);
+    await req.kv.del(`reset_pin_${targetEmail}`);
+
+    console.log(`[ADMIN ACTION] Account completely purged: ${targetEmail}`);
+    res.json({ success: true, message: `Account ${targetEmail} successfully deleted.` });
   });
 
   // GAME SAVES
