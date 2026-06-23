@@ -141,7 +141,17 @@ module.exports = () => {
   // DEV OVERRIDES & ASSETS
   router.post('/store/dev-grant-vip', async (req, res) => {
     if (!req.isAdmin) return res.status(403).json({ error: "Forbidden." });
-    await req.kv.set(`rol_vip_${req.body.userId}`, { active: true, tier: "Dev", lootBoxesUsedThisWeek: 7, totalLootBoxesOpened: 0, loyaltyMonths: 5, grantedAt: new Date().toISOString() });
+
+    // THE FIX: Set to -999 to act as an infinite Dev Cheat stash
+    await req.kv.set(`rol_vip_${req.body.userId}`, {
+      active: true,
+      tier: "Grandmaster",
+      lootBoxesUsedThisWeek: -999,
+      totalLootBoxesOpened: 0,
+      loyaltyMonths: 5,
+      grantedAt: new Date().toISOString()
+    });
+
     await logAdminActivity(req, "grant_vip", req.user.email, `Granted Dev VIP to ${req.body.userId}`, req.body.userId);
     res.json({ success: true });
   });
