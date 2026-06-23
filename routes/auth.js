@@ -34,6 +34,13 @@ module.exports = (transporter) => {
       };
       console.log(`[DATABASE] New account registered: ${email}`);
 
+      // THE FIX: Deposit 1 Free Writ of Renaming into every new player's Vault instantly!
+      await req.kv.set(`rol_store_${userId}`, {
+        purchased: ["writ_of_renaming"],
+        equippedCastle: null,
+        equippedHero: null
+      });
+
       if (isGameMaster) {
         await req.kv.set(`rol_vip_${userId}`, {
           active: true, tier: "Grandmaster", lootBoxesUsedThisWeek: 0,
@@ -60,7 +67,6 @@ module.exports = (transporter) => {
     const existingUser = await req.kv.get(`user_${email}`);
     if (existingUser) return res.status(400).json({ error: "Account already exists." });
 
-    // THE FIX: Check if ANY other user already has this display name (case-insensitive)
     const allUsers = await req.kv.getByPrefix('user_');
     const nameTaken = allUsers.some(user =>
       user.displayName && user.displayName.toLowerCase() === name.toLowerCase()
@@ -101,6 +107,40 @@ module.exports = (transporter) => {
   router.get('/auth/v1/user', (req, res) => {
     if (!req.user) return res.json({ id: `user_local@player.com`, aud: "authenticated", role: "authenticated", email: "local@player.com" });
     res.json({ id: req.user.id, aud: "authenticated", role: "authenticated", email: req.user.email });
+  });
+
+  // ==========================================
+  // NEW: ACCOUNT RENAME LOGIC
+  // ==========================================
+  router.post('/auth/v1/change-name', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const { newName } = req.body;
+    if (!newName || newName.length < 3) return res.status(400).json({ error: "Name must be at least 3 characters." });
+
+    // Ensure nobody steals someone else's identity
+    const allUsers = await req.kv.getByPrefix('user_');
+    const nameTaken = allUsers.some(u => u.displayName?.toLowerCase() === newName.toLowerCase() && u.id !== req.user.id);
+    if (nameTaken) return res.status(400).json({ error: "That Game Name is already taken!" });
+
+    let userRecord = await req.kv.get(req.user.id);
+    if (!userRecord) return res.status(404).json({ error: "User not found" });
+
+    // Grab the Vault inventory
+    let storeRecord = await req.kv.get(`rol_store_${req.user.id}`) || { purchased: [] };
+
+    // Check for the Writ
+    if (!storeRecord.purchased || !storeRecord.purchased.includes("writ_of_renaming")) {
+      return res.status(400).json({ error: "You require a 'Writ of Renaming' from your Vault to change your name." });
+    }
+
+    // Securely consume the item so it can't be used twice!
+    storeRecord.purchased = storeRecord.purchased.filter(id => id !== "writ_of_renaming");
+    await req.kv.set(`rol_store_${req.user.id}`, storeRecord);
+
+    userRecord.displayName = newName;
+    await req.kv.set(req.user.id, userRecord);
+
+    res.json({ success: true, displayName: newName, store: storeRecord });
   });
 
   router.post('/auth/v1/recover', async (req, res) => {
@@ -149,34 +189,22 @@ module.exports = (transporter) => {
     }
   });
 
-  // ==========================================
-  // ADMIN DASHBOARD: DELETE USER
-  // ==========================================
   router.post('/auth/v1/admin/delete-user', async (req, res) => {
     const targetEmail = req.body?.targetEmail;
-
-    if (!targetEmail) {
-      return res.status(400).json({ error: "Target email required." });
-    }
+    if (!targetEmail) return res.status(400).json({ error: "Target email required." });
 
     const targetId = `user_${targetEmail}`;
     const existingUser = await req.kv.get(targetId);
+    if (!existingUser) return res.status(404).json({ error: "User not found in database." });
 
-    if (!existingUser) {
-      return res.status(404).json({ error: "User not found in database." });
-    }
-
-    // Nuke the user and all their associated data to keep the database clean
     await req.kv.del(targetId);
     await req.kv.del(`rol_vip_${targetId}`);
     await req.kv.del(`rol_presets_${targetId}`);
     await req.kv.del(`reset_pin_${targetEmail}`);
 
-    console.log(`[ADMIN ACTION] Account completely purged: ${targetEmail}`);
     res.json({ success: true, message: `Account ${targetEmail} successfully deleted.` });
   });
 
-  // GAME SAVES
   router.post('/save-game', async (req, res) => {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
     const { saveId, saveData } = req.body;
@@ -211,7 +239,6 @@ module.exports = (transporter) => {
     res.json({ success: true });
   });
 
-  // PRESETS
   router.get('/presets/list', async (req, res) => {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
     const presets = await req.kv.get(`rol_presets_${req.user.id}`) || [null, null];

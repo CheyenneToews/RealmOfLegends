@@ -32,11 +32,22 @@ module.exports = () => {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
     const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
     if (!session) return res.status(404).json({ error: "Not found" });
+
+    // THE FIREWALL: Filter out any AI bot configurations from the capacity check
+    const humanPlayers = session.players.filter(p => !p.userId.startsWith('ai_'));
+    if (humanPlayers.length >= session.maxPlayers && !session.players.find(p => p.userId === req.user.id)) {
+      return res.status(400).json({ error: "Lobby is full of human players." });
+    }
+
     if (!session.players.find(p => p.userId === req.user.id)) {
       session.players.push({ userId: req.user.id, email: req.user.email, isHost: false, joinedAt: new Date().toISOString() });
       await req.kv.set(`rol_session_${session.id}`, session);
       let idx = await req.kv.get(`rol_session_idx_${session.id}`);
-      if (idx) { idx.playerCount = session.players.length; await req.kv.set(`rol_session_idx_${session.id}`, idx); }
+      if (idx) {
+        // Sync index specifically to real human connections
+        idx.playerCount = session.players.filter(p => !p.userId.startsWith('ai_')).length;
+        await req.kv.set(`rol_session_idx_${session.id}`, idx);
+      }
     }
     res.json({ success: true, session });
   });
@@ -62,9 +73,7 @@ module.exports = () => {
     if (req.body.action.type === "END_TURN") {
       if (!session.ghostActions) session.ghostActions = {};
 
-      // THE WEGO FIX: Tell the server to check inside the action payload for the path!
       session.ghostActions[req.user.id] = req.body.ghostPath || req.body.action?.ghostPath || [];
-
       session.planningIndex = (session.planningIndex || 0) + 1;
 
       if (req.body.stateSnapshot) {
@@ -72,7 +81,6 @@ module.exports = () => {
         session.playerStates[req.user.id] = { snapshot: req.body.stateSnapshot, turnCount: session.turnCount };
       }
 
-      // Turn advances when all players lock in!
       if (session.planningIndex >= session.players.length) {
         session.turnCount += 1;
         session.initiativeOrder = session.players.map(p => ({ userId: p.userId, roll: Math.floor(Math.random() * 20) + 1 })).sort((a, b) => a.roll - b.roll);
@@ -116,7 +124,10 @@ module.exports = () => {
       session.players = session.players.filter(p => p.userId !== req.user.id);
       await req.kv.set(`rol_session_${req.params.sessionId}`, session);
       let idx = await req.kv.get(`rol_session_idx_${req.params.sessionId}`);
-      if (idx) { idx.playerCount = session.players.length; await req.kv.set(`rol_session_idx_${req.params.sessionId}`, idx); }
+      if (idx) {
+        idx.playerCount = session.players.filter(p => !p.userId.startsWith('ai_')).length;
+        await req.kv.set(`rol_session_idx_${req.params.sessionId}`, idx);
+      }
     }
     res.json({ success: true });
   });
@@ -197,7 +208,6 @@ module.exports = () => {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
     if (!req.body.content) return res.status(400).json({ error: "Message content required" });
 
-    // Fetch the user to get their actual Display Name, fallback to email prefix if not set
     const userRecord = await req.kv.get(req.user.id);
     const authorName = userRecord?.displayName || req.user.email.split('@')[0];
 
@@ -213,7 +223,6 @@ module.exports = () => {
 
     messages.push(newMessage);
 
-    // GAME INTEGRITY: Keep only the latest 100 messages to prevent database bloat
     if (messages.length > 100) {
       messages = messages.slice(messages.length - 100);
     }
