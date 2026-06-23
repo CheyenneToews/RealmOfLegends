@@ -19,16 +19,6 @@ if (!fs.existsSync(dbFolder)) {
   fs.mkdirSync(dbFolder, { recursive: true });
 }
 
-// THE ACCOUNT IMPORTER: Safely move old accounts into the vault
-if (process.env.NODE_ENV === 'production' && fs.existsSync('./import_accounts.data')) {
-  const vaultDbSize = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
-
-  // If the vault is virtually empty (under 30kb), import the accounts!
-  if (vaultDbSize < 30000) {
-    fs.copyFileSync('./import_accounts.data', dbPath);
-    console.log("🛡️ Old accounts successfully imported into the permanent vault!");
-  }
-}
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
