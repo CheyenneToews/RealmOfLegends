@@ -184,5 +184,43 @@ module.exports = () => {
     res.json({ success: true, message: newMessage });
   });
 
+  // ==========================================
+  // CONTINENTAL MESSAGE BOARD
+  // ==========================================
+  router.get('/board', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const messages = await req.kv.get('rol_message_board') || [];
+    res.json({ success: true, messages });
+  });
+
+  router.post('/board', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (!req.body.content) return res.status(400).json({ error: "Message content required" });
+
+    // Fetch the user to get their actual Display Name, fallback to email prefix if not set
+    const userRecord = await req.kv.get(req.user.id);
+    const authorName = userRecord?.displayName || req.user.email.split('@')[0];
+
+    let messages = await req.kv.get('rol_message_board') || [];
+
+    const newMessage = {
+      id: `mb_${Date.now()}`,
+      authorId: req.user.id,
+      authorName: authorName,
+      content: req.body.content,
+      timestamp: new Date().toISOString()
+    };
+
+    messages.push(newMessage);
+
+    // GAME INTEGRITY: Keep only the latest 100 messages to prevent database bloat
+    if (messages.length > 100) {
+      messages = messages.slice(messages.length - 100);
+    }
+
+    await req.kv.set('rol_message_board', messages);
+    res.json({ success: true, message: newMessage });
+  });
+
   return router;
 };
