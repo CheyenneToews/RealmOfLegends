@@ -58,20 +58,28 @@ module.exports = () => {
     if (!session) return res.status(404).json({ error: "Not found" });
 
     session.actionLog.push({ playerId: req.user.id, action: req.body.action, seq: session.actionLog.length });
+
     if (req.body.action.type === "END_TURN") {
       if (!session.ghostActions) session.ghostActions = {};
-      session.ghostActions[req.user.id] = req.body.ghostPath || [];
+
+      // THE WEGO FIX: Tell the server to check inside the action payload for the path!
+      session.ghostActions[req.user.id] = req.body.ghostPath || req.body.action?.ghostPath || [];
+
       session.planningIndex = (session.planningIndex || 0) + 1;
+
       if (req.body.stateSnapshot) {
         if (!session.playerStates) session.playerStates = {};
         session.playerStates[req.user.id] = { snapshot: req.body.stateSnapshot, turnCount: session.turnCount };
       }
+
+      // Turn advances when all players lock in!
       if (session.planningIndex >= session.players.length) {
         session.turnCount += 1;
         session.initiativeOrder = session.players.map(p => ({ userId: p.userId, roll: Math.floor(Math.random() * 20) + 1 })).sort((a, b) => a.roll - b.roll);
         session.planningIndex = 0;
       }
     }
+
     await req.kv.set(`rol_session_${session.id}`, session);
     res.json({ success: true, session });
   });
@@ -173,6 +181,44 @@ module.exports = () => {
     const newMessage = { id: `msg_${Date.now()}`, sender_id: req.user.id, receiver_id: req.body.receiverId, content: req.body.content, created_at: new Date().toISOString() };
     chatHistory.push(newMessage);
     await req.kv.set(`rol_chat_${convoId}`, chatHistory);
+    res.json({ success: true, message: newMessage });
+  });
+
+  // ==========================================
+  // CONTINENTAL MESSAGE BOARD
+  // ==========================================
+  router.get('/board', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const messages = await req.kv.get('rol_message_board') || [];
+    res.json({ success: true, messages });
+  });
+
+  router.post('/board', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (!req.body.content) return res.status(400).json({ error: "Message content required" });
+
+    // Fetch the user to get their actual Display Name, fallback to email prefix if not set
+    const userRecord = await req.kv.get(req.user.id);
+    const authorName = userRecord?.displayName || req.user.email.split('@')[0];
+
+    let messages = await req.kv.get('rol_message_board') || [];
+
+    const newMessage = {
+      id: `mb_${Date.now()}`,
+      authorId: req.user.id,
+      authorName: authorName,
+      content: req.body.content,
+      timestamp: new Date().toISOString()
+    };
+
+    messages.push(newMessage);
+
+    // GAME INTEGRITY: Keep only the latest 100 messages to prevent database bloat
+    if (messages.length > 100) {
+      messages = messages.slice(messages.length - 100);
+    }
+
+    await req.kv.set('rol_message_board', messages);
     res.json({ success: true, message: newMessage });
   });
 
