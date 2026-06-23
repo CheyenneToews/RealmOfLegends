@@ -27,8 +27,7 @@ module.exports = () => {
       { id: "cloth_pants", name: "Cloth Pants", emoji: "👖", type: "armor", slot: "legs" },
       { id: "copper_ring", name: "Copper Ring", emoji: "💍", type: "accessory", slot: "ring1" },
       { id: "wooden_pendant", name: "Wooden Pendant", emoji: "📿", type: "accessory", slot: "amulet" },
-      { id: "wooden_shield", name: "Wooden Shield", emoji: "🛡️", type: "armor", slot: "offHand" },
-      { id: "health_potion", name: "Health Potion", emoji: "🧪", type: "consumable" },
+      { id: "wooden_shield", name: "Wooden Shield", emoji: "🛡️", type: "armor", slot: "offHand" }
     ],
     uncommon: [
       { id: "steel_longsword", name: "Steel Longsword", emoji: "⚔️", type: "weapon", slot: "mainHand" },
@@ -38,8 +37,7 @@ module.exports = () => {
       { id: "reinforced_greaves", name: "Reinforced Greaves", emoji: "👖", type: "armor", slot: "legs" },
       { id: "ring_of_strength", name: "Ring of Strength", emoji: "💍", type: "accessory", slot: "ring1" },
       { id: "amulet_of_health", name: "Amulet of Health", emoji: "📿", type: "accessory", slot: "amulet" },
-      { id: "owlseye_pendant", name: "Owl's Eye Pendant", emoji: "🦉", type: "accessory", slot: "amulet" },
-      { id: "greater_health_potion", name: "Greater Health Potion", emoji: "🧪", type: "consumable" },
+      { id: "owlseye_pendant", name: "Owl's Eye Pendant", emoji: "🦉", type: "accessory", slot: "amulet" }
     ],
     rare: [
       { id: "elven_bow", name: "Elven Bow", emoji: "🏹", type: "weapon", slot: "mainHand" },
