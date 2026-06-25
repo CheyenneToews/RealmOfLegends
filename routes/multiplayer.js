@@ -72,22 +72,39 @@ module.exports = () => {
 
     if (req.body.action.type === "END_TURN") {
       if (!session.ghostActions) session.ghostActions = {};
+      if (!session.playerStates) session.playerStates = {};
 
+      // 1. Instantly broadcast the path and lock status to the lobby
       session.ghostActions[req.user.id] = req.body.ghostPath || req.body.action?.ghostPath || [];
+
+      if (!session.playerStates[req.user.id]) session.playerStates[req.user.id] = {};
+      session.playerStates[req.user.id].isLocked = req.body.action?.isLocked || req.body.isLocked || true;
+
       session.planningIndex = (session.planningIndex || 0) + 1;
 
       if (req.body.stateSnapshot) {
-        if (!session.playerStates) session.playerStates = {};
-        session.playerStates[req.user.id] = { snapshot: req.body.stateSnapshot, turnCount: session.turnCount };
+        session.playerStates[req.user.id].snapshot = req.body.stateSnapshot;
+        session.playerStates[req.user.id].turnCount = session.turnCount;
       }
 
-      if (session.planningIndex >= session.players.length) {
+      // 2. Filter out AI bots and check if all HUMAN players have locked in
+      const humanPlayers = session.players.filter(p => !p.userId.startsWith('ai_'));
+
+      if (session.planningIndex >= humanPlayers.length) {
+        // Advance global turn
         session.turnCount += 1;
         session.initiativeOrder = session.players.map(p => ({ userId: p.userId, roll: Math.floor(Math.random() * 20) + 1 })).sort((a, b) => a.roll - b.roll);
         session.planningIndex = 0;
+
+        // 3. Clear locks and ghost paths for the start of the new turn
+        for (let key in session.playerStates) {
+          session.playerStates[key].isLocked = false;
+        }
+        session.ghostActions = {};
       }
     }
 
+    // Save everything to SQLite so the next /poll catches it instantly
     await req.kv.set(`rol_session_${session.id}`, session);
     res.json({ success: true, session });
   });
