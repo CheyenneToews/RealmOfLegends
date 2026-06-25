@@ -55,9 +55,44 @@ module.exports = () => {
   router.post('/sessions/:sessionId/start', async (req, res) => {
     const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
     if (!session) return res.status(404).json({ error: "Not found" });
-    session.status = "active"; session.turnCount = 1;
+
+    session.status = "active";
+    session.turnCount = 1;
     session.initiativeOrder = session.players.map(p => ({ userId: p.userId, roll: Math.floor(Math.random() * 20) + 1 })).sort((a, b) => a.roll - b.roll);
-    session.planningIndex = 0; session.ghostActions = {};
+    session.planningIndex = 0;
+    session.ghostActions = {};
+
+    // 🛡️ NEW: Initialize the PvP Diplomacy Matrix
+    session.pvpDiplomacy = {};
+    for (let i = 0; i < session.players.length; i++) {
+      for (let j = i + 1; j < session.players.length; j++) {
+        const p1 = session.players[i];
+        const p2 = session.players[j];
+
+        // Skip AI bots (they use their own diplomacy system)
+        if (p1.userId.startsWith('ai_') || p2.userId.startsWith('ai_')) continue;
+
+        // Create a unique pair key (e.g., "user_123_user_456")
+        const pairKey = [p1.userId, p2.userId].sort().join('_');
+
+        // If they share a Team ID, lock them into a permanent alliance!
+        if (p1.teamId && p1.teamId === p2.teamId) {
+          session.pvpDiplomacy[pairKey] = {
+            status: "allied",
+            type: "military_alliance",
+            establishedTurn: 1,
+            isPermanentTeam: true
+          };
+        } else {
+          session.pvpDiplomacy[pairKey] = {
+            status: "neutral",
+            type: null,
+            establishedTurn: 1
+          };
+        }
+      }
+    }
+
     await req.kv.set(`rol_session_${session.id}`, session);
     await req.kv.set(`rol_session_idx_${session.id}`, { id: session.id, status: "active" });
     res.json({ success: true, session });
@@ -109,6 +144,45 @@ module.exports = () => {
     res.json({ success: true, session });
   });
 
+  // 🤝 THE FIX: Dedicated PvP Diplomacy Endpoint
+  router.post('/sessions/:sessionId/diplomacy', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
+    if (!session) return res.status(404).json({ error: "Not found" });
+
+    const { targetUserId, actionType, treatyType, accept } = req.body;
+    const pairKey = [req.user.id, targetUserId].sort().join('_');
+
+    if (!session.pvpDiplomacy) session.pvpDiplomacy = {};
+    if (!session.pvpDiplomacy[pairKey]) {
+      session.pvpDiplomacy[pairKey] = { status: "neutral", type: null, establishedTurn: session.turnCount };
+    }
+
+    const dip = session.pvpDiplomacy[pairKey];
+
+    // Handle the 3 specific diplomacy states
+    if (actionType === "PROPOSE_TREATY") {
+      dip.pendingProposal = { fromUserId: req.user.id, type: treatyType };
+    }
+    else if (actionType === "RESOLVE_TREATY") {
+      if (accept && dip.pendingProposal) {
+        dip.status = dip.pendingProposal.type === "military_alliance" ? "allied" : "peace_treaty";
+        dip.type = dip.pendingProposal.type;
+        dip.establishedTurn = session.turnCount;
+      }
+      dip.pendingProposal = null; // Always clear the proposal whether accepted or rejected
+    }
+    else if (actionType === "DECLARE_WAR") {
+      dip.status = "neutral";
+      dip.type = null;
+      dip.pendingProposal = null;
+      dip.establishedTurn = session.turnCount;
+    }
+
+    await req.kv.set(`rol_session_${session.id}`, session);
+    res.json({ success: true, session });
+  });
+
   router.get('/sessions/:sessionId/poll', async (req, res) => {
     const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
     if (!session) return res.status(404).json({ error: "Not found" });
@@ -117,7 +191,8 @@ module.exports = () => {
       initiativeOrder: session.initiativeOrder || [], planningIndex: session.planningIndex || 0,
       ghostActions: session.ghostActions || {}, turnCount: session.turnCount, status: session.status,
       players: session.players, playerStates: session.playerStates || {}, chatMessages: session.chatMessages || [],
-      competitiveMode: session.competitiveMode || false
+      competitiveMode: session.competitiveMode || false,
+      pvpDiplomacy: session.pvpDiplomacy || {}
     });
   });
 
@@ -126,6 +201,26 @@ module.exports = () => {
     const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
     if (session) { session.chatMessages.push({ playerId: req.user.id, playerName: req.user.email.split('@')[0], message: req.body.message, turn: session.turnCount }); await req.kv.set(`rol_session_${session.id}`, session); }
     res.json({ success: true });
+  });
+
+  router.put('/sessions/:sessionId/teams', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
+
+    // Only the host is allowed to change teams
+    if (!session || session.hostId !== req.user.id) {
+      return res.status(403).json({ error: "Only the host can change teams." });
+    }
+
+    const { targetUserId, newTeamId } = req.body;
+    const player = session.players.find(p => p.userId === targetUserId);
+
+    if (player) {
+      player.teamId = newTeamId;
+      await req.kv.set(`rol_session_${session.id}`, session);
+    }
+
+    res.json({ success: true, session });
   });
 
   router.put('/sessions/:sessionId/settings', async (req, res) => {
