@@ -183,6 +183,33 @@ module.exports = () => {
     res.json({ success: true, session });
   });
 
+  // ✅ NEW: The Ready-Up Endpoint
+  router.put('/sessions/:sessionId/ready', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
+    if (!session) return res.status(404).json({ error: "Not found" });
+
+    const player = session.players.find(p => p.userId === req.user.id);
+    if (player) {
+      player.isReady = req.body.isReady;
+      await req.kv.set(`rol_session_${session.id}`, session);
+    }
+    res.json({ success: true, session });
+  });
+
+  // ✅ NEW: The Start Match Endpoint (Host Only)
+  router.put('/sessions/:sessionId/start', async (req, res) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
+
+    // Only the Host can officially start the match
+    if (!session || session.hostId !== req.user.id) return res.status(403).json({ error: "Not host" });
+
+    session.status = "active";
+    await req.kv.set(`rol_session_${session.id}`, session);
+    res.json({ success: true, session });
+  });
+
   router.get('/sessions/:sessionId/poll', async (req, res) => {
     const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
     if (!session) return res.status(404).json({ error: "Not found" });
