@@ -33,6 +33,11 @@ module.exports = () => {
     const session = await req.kv.get(`rol_session_${req.params.sessionId}`);
     if (!session) return res.status(404).json({ error: "Not found" });
 
+    // 🔒 THE FIX: Lock the door so nobody joins during the Character Draft!
+    if (session.status !== "lobby") {
+      return res.status(400).json({ error: "This match has already started drafting!" });
+    }
+
     // THE FIREWALL: Filter out any AI bot configurations from the capacity check
     const humanPlayers = session.players.filter(p => !p.userId.startsWith('ai_'));
     if (humanPlayers.length >= session.maxPlayers && !session.players.find(p => p.userId === req.user.id)) {
@@ -206,6 +211,12 @@ module.exports = () => {
     if (!session || session.hostId !== req.user.id) return res.status(403).json({ error: "Not host" });
 
     session.status = "active";
+
+    // ✅ SYNC THE MAP SETTINGS: Save the Host's world generation settings
+    if (req.body && req.body.worldSettings) {
+      session.worldSettings = req.body.worldSettings;
+    }
+
     await req.kv.set(`rol_session_${session.id}`, session);
     res.json({ success: true, session });
   });
@@ -218,6 +229,7 @@ module.exports = () => {
       initiativeOrder: session.initiativeOrder || [], planningIndex: session.planningIndex || 0,
       ghostActions: session.ghostActions || {}, turnCount: session.turnCount, status: session.status,
       players: session.players, playerStates: session.playerStates || {}, chatMessages: session.chatMessages || [],
+      worldSettings: session.worldSettings || null,
       competitiveMode: session.competitiveMode || false,
       pvpDiplomacy: session.pvpDiplomacy || {}
     });
