@@ -34,11 +34,15 @@ module.exports = (transporter) => {
       };
       console.log(`[DATABASE] New account registered: ${email}`);
 
-      // THE FIX: Deposit 1 Free Writ of Renaming into every new player's Vault instantly!
-      await req.kv.set(`rol_store_${userId}`, {
-        purchased: ["writ_of_renaming"],
-        equippedCastle: null,
-        equippedHero: null
+      // THE FIX: Deposit 1 Free Writ of Renaming into the ACTUAL Vault array used by store.js
+      await req.kv.set(`rol_vault_${userId}`, [
+        { id: "writ_of_renaming", acquiredAt: new Date().toISOString() }
+      ]);
+
+      // Initialize cosmetics tracking
+      await req.kv.set(`rol_cosmetics_${userId}`, {
+        castleId: null,
+        skinId: null
       });
 
       if (isGameMaster) {
@@ -110,7 +114,7 @@ module.exports = (transporter) => {
   });
 
   // ==========================================
-  // NEW: ACCOUNT RENAME LOGIC
+  // FIXED: ACCOUNT RENAME LOGIC
   // ==========================================
   router.post('/auth/v1/change-name', async (req, res) => {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
@@ -125,22 +129,31 @@ module.exports = (transporter) => {
     let userRecord = await req.kv.get(req.user.id);
     if (!userRecord) return res.status(404).json({ error: "User not found" });
 
-    // Grab the Vault inventory
-    let storeRecord = await req.kv.get(`rol_store_${req.user.id}`) || { purchased: [] };
+    // THE FIX: Grab the ACTUAL Vault inventory (used by store.js)
+    let userVault = await req.kv.get(`rol_vault_${req.user.id}`) || [];
 
-    // Check for the Writ
-    if (!storeRecord.purchased || !storeRecord.purchased.includes("writ_of_renaming")) {
-      return res.status(400).json({ error: "You require a 'Writ of Renaming' from your Vault to change your name." });
+    // Find the exact index of the Writ of Renaming (supporting both object and string structures)
+    const writIndex = userVault.findIndex(v => (typeof v === 'string' ? v : v.id) === "writ_of_renaming");
+
+    if (writIndex === -1) {
+      // Legacy Fallback: Just in case the free starter writ is stuck in the old database key
+      let legacyStore = await req.kv.get(`rol_store_${req.user.id}`);
+      if (legacyStore && legacyStore.purchased && legacyStore.purchased.includes("writ_of_renaming")) {
+        legacyStore.purchased = legacyStore.purchased.filter(id => id !== "writ_of_renaming");
+        await req.kv.set(`rol_store_${req.user.id}`, legacyStore);
+      } else {
+        return res.status(400).json({ error: "You require a 'Writ of Renaming' from your Vault to change your name." });
+      }
+    } else {
+      // Securely consume EXACTLY ONE writ from the vault so it can't be used twice!
+      userVault.splice(writIndex, 1);
+      await req.kv.set(`rol_vault_${req.user.id}`, userVault);
     }
-
-    // Securely consume the item so it can't be used twice!
-    storeRecord.purchased = storeRecord.purchased.filter(id => id !== "writ_of_renaming");
-    await req.kv.set(`rol_store_${req.user.id}`, storeRecord);
 
     userRecord.displayName = newName;
     await req.kv.set(req.user.id, userRecord);
 
-    res.json({ success: true, displayName: newName, store: storeRecord });
+    res.json({ success: true, displayName: newName });
   });
 
   router.post('/auth/v1/recover', async (req, res) => {
